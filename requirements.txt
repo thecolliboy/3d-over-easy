@@ -1,0 +1,29 @@
+# Pinned dependency set for web-3d-builder - everything needed to run, test, and extend the app.
+# ColliBoy
+
+# Web framework and cross-origin access for the browser client
+Flask==3.1.0
+Flask-CORS==5.0.1
+
+# WSGI servers that run.py boots: gunicorn on mac/linux, waitress on windows (no fork())
+gunicorn==23.0.0
+waitress==3.0.2
+
+# Mesh math and solid geometry kernel (watertight CSG)
+numpy>=2.0.0
+manifold3d>=3.5.0
+
+# Text-to-geometry pipeline: local inference runtime plus parametric CAD scripting
+llama-cpp-python>=0.3.0
+build123d>=0.8.0
+
+# Image decoding and structured logging (ColliBoy)
+Pillow==11.1.0
+structlog==25.4.0
+
+# Test runner and coverage reporting
+pytest==8.3.4
+pytest-cov==6.1.1
+
+# Environment variable loading for local runs
+python-dotenv==1.0.1

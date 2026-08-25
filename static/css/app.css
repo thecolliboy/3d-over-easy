@@ -1,0 +1,1760 @@
+/* ==================================================
+   web-3d-builder - primary stylesheet
+   Dark UI in the spirit of Microsoft 3D Builder
+   ColliBoy
+   ================================================== */
+
+/* --- Base reset applied to every element --- */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --bg-toolbar: #1e1e36;
+    --bg-hover: #2a2a4a;
+    --bg-active: #0f3460;
+    --bg-elevated: #23233f;
+    --text-primary: #e8e8f0;
+    --text-secondary: #a0a0b8;
+    --text-muted: #6a6a82;
+    --accent: #5390d9;
+    --accent-hover: #6aa0e8;
+    --border-color: #2a2a44;
+    --error: #e94560;
+    --toolbar-height: 48px;
+    --statusbar-height: 32px;
+    --panel-width: 280px;
+
+    /* Shared spacing tokens reused across padding, margins and gaps */
+    --space-1: 1px;
+    --space-2: 2px;
+    --space-3: 3px;
+    --space-4: 4px;
+    --space-6: 6px;
+    --space-8: 8px;
+    --space-10: 10px;
+    --space-12: 12px;
+    --space-14: 14px;
+    --space-16: 16px;
+    --space-20: 20px;
+    --space-32: 32px;
+
+    /* Neutral grey accents reserved for aesthetic mode */
+    --aesthetic-glow: rgba(150, 150, 156, 0.55);
+    --aesthetic-text: #19191b;
+}
+
+/* --- Light theme, engaged while the day/night toggle sits in its day position --- */
+body.light-mode {
+    --bg-primary: #f4f5f8;
+    --bg-secondary: #e9ebf1;
+    --bg-tertiary: #dde1ea;
+    --bg-toolbar: #ffffff;
+    --bg-hover: #e2e5ee;
+    --bg-active: #d7e6fb;
+    --bg-elevated: #ffffff;
+    --text-primary: #1c1c28;
+    --text-secondary: #4a4a5c;
+    --text-muted: #85859a;
+    --accent: #3568b8;
+    --accent-hover: #4a7ecb;
+    --border-color: #d7dae2;
+}
+
+/* Active states normally pair --bg-active with an accent border and white
+   text. Under the light theme that saturated blue clashes with the neutral
+   grey button groups (the always-on build-plate buttons vs. the view-mode
+   ones), so active buttons here get a darker-grey treatment instead - same
+   hue family as the surrounding UI, just bold enough to read as "on". */
+body.light-mode .toolbar-btn:active,
+body.light-mode .toolbar-btn.active,
+body.light-mode .view-mode-btn.active,
+body.light-mode .smart-snap-btn.active,
+body.light-mode .status-btn.active,
+body.light-mode .transform-mode-btn.active,
+body.light-mode .split-mode-btn.active {
+    background: var(--bg-tertiary);
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+/* --- Shared utility hooks --- */
+.hidden {
+    display: none !important;
+}
+
+/* --- Main toolbar across the top of the window --- */
+#toolbar {
+    height: var(--toolbar-height);
+    background: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-8);
+    gap: var(--space-4);
+    overflow-x: visible;
+    overflow-y: visible;
+    user-select: none;
+}
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.toolbar-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--border-color);
+    margin: 0 var(--space-6);
+    flex-shrink: 0;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    padding: var(--space-6) var(--space-12);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.toolbar-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+}
+
+.toolbar-btn:active,
+.toolbar-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.toolbar-btn svg {
+    flex-shrink: 0;
+}
+
+/* --- Central workspace, filling the space between toolbar and status bar --- */
+#main-content {
+    height: calc(100vh - var(--toolbar-height) - var(--statusbar-height));
+    display: flex;
+    overflow: hidden;
+}
+
+/* --- Viewport wrapper hosting the three.js canvas --- */
+#viewport-container {
+    flex: 1;
+    position: relative;
+    background: #0d0d1a;
+    overflow: hidden;
+}
+
+#viewport-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* --- Shading view toggles, docked at the bottom-left of the viewport --- */
+#view-modes {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    display: flex;
+    gap: var(--space-4);
+    z-index: 10;
+}
+
+.view-mode-btn {
+    width: 36px;
+    height: 36px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.view-mode-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.view-mode-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* --- Drag-snap switch, sitting with the build-plate controls at bottom-right --- */
+.smart-snap-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    height: 36px;
+    padding: 0 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+
+.smart-snap-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.smart-snap-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* --- Empty-state drop zone, shown while the scene holds no models --- */
+.drop-zone {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--text-muted);
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.drop-zone svg {
+    margin-bottom: var(--space-16);
+    opacity: 0.4;
+}
+
+.drop-zone p {
+    font-size: 16px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-8);
+}
+
+.drop-zone-sub {
+    font-size: 13px !important;
+    color: var(--text-muted) !important;
+}
+
+.drop-zone-box {
+    position: relative;
+    pointer-events: auto;
+    background: rgba(26, 26, 46, 0.65);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: var(--space-32) 40px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.drop-zone-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+}
+
+.drop-zone-icon-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.drop-zone-icon-btn svg {
+    /* The parent .drop-zone rule already dims this svg at rest, so the
+       hover/focus overrides below only brighten it - no margin or opacity
+       changes are needed here. */
+    pointer-events: none;
+}
+
+.drop-zone-icon-btn:hover,
+.drop-zone-icon-btn:focus-visible {
+    color: var(--text-primary);
+}
+
+.drop-zone-icon-btn:hover svg,
+.drop-zone-icon-btn:focus-visible svg {
+    opacity: 0.8;
+}
+
+.import-format-badges {
+    display: flex;
+    gap: var(--space-6);
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: var(--space-14);
+}
+
+.format-badge {
+    padding: var(--space-3) var(--space-10);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    transition: all 0.15s;
+}
+
+.format-badge:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+/* --- Busy-state loading overlay --- */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(13, 13, 26, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+}
+
+.loading-overlay.hidden {
+    display: none;
+}
+
+.spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-overlay p {
+    margin-top: var(--space-16);
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.progress-bar-container {
+    width: 200px;
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    margin-top: var(--space-12);
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.progress-bar.indeterminate {
+    width: 30% !important;
+    animation: progress-indeterminate 1.5s infinite ease-in-out;
+}
+
+@keyframes progress-indeterminate {
+    0% { transform: translateX(-100%); }
+    50% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+
+/* --- Right-hand properties panel --- */
+#properties-panel {
+    width: var(--panel-width);
+    background: var(--bg-toolbar);
+    border-left: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-8);
+    width: 100%;
+    padding: var(--space-10) var(--space-14);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    text-align: left;
+}
+
+.panel-header:hover {
+    color: var(--text-primary);
+}
+
+/* Collapsible sections of the right-hand panel (Scene Objects / Properties / Controls) */
+.panel-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-section-grow {
+    flex: 1;
+    min-height: 0;
+}
+
+.panel-chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.15s ease;
+}
+
+.panel-section.collapsed .panel-section-body {
+    display: none;
+}
+
+.panel-section.collapsed .panel-chevron {
+    transform: rotate(-90deg);
+}
+
+/* A collapsed section shrinks to its header instead of keeping the grown space.
+   flex-basis must be reset too: .panel-section-grow's `flex: 1` sets basis 0%,
+   which would otherwise collapse the section to height 0 (title spills out and
+   the next section overlaps it) once grow is zeroed on collapse. */
+.panel-section.collapsed {
+    flex-grow: 0;
+    flex-basis: auto;
+}
+
+/* Ad banner pinned to the bottom of the right-hand panel */
+.panel-banner {
+    flex-shrink: 0;
+    height: 200px;
+    border-top: 1px solid var(--border-color);
+}
+
+.panel-banner iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-12);
+}
+
+.no-selection {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-32) var(--space-16);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* Label/value property rows */
+.prop-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-8) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.prop-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.prop-value {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* --- Thumbnail grid of scene objects, stacked above the properties section --- */
+.object-list {
+    max-height: 216px;
+    overflow-y: auto;
+    padding: var(--space-12);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+    gap: var(--space-8);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-toolbar);
+    flex-shrink: 0;
+}
+
+.object-list-empty {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-16) var(--space-8);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.object-thumb {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    padding: 0;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.object-thumb:hover {
+    border-color: var(--text-muted);
+}
+
+.object-thumb.selected {
+    border-color: var(--accent);
+    border-width: 3px;
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.object-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    pointer-events: none;
+}
+
+.object-thumb .object-thumb-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 1px 3px;
+    font-size: 9px;
+    line-height: 1.3;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* --- Status bar along the bottom edge --- */
+#status-bar {
+    position: relative;
+    height: var(--statusbar-height);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-12);
+    gap: var(--space-16);
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+/* Brand mark pinned to the exact center of the status bar via absolute
+   positioning, independent of the flex layout around it */
+.status-brand {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.status-brand-logo {
+    height: calc(var(--statusbar-height) - var(--space-12));
+    width: auto;
+    display: block;
+}
+
+/* The brand mark ships in two colours - a dark glyph for the light theme and
+   a white one for night mode; only one is visible at a time. */
+.logo-day { display: none; }
+body.light-mode .logo-day { display: block; }
+body.light-mode .logo-night { display: none; }
+
+.status-brand-text {
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: baseline;
+}
+
+.status-brand-text .brand-bold {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.status-brand-text .brand-regular {
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.status-item {
+    white-space: nowrap;
+}
+
+.status-spacer {
+    flex: 1;
+}
+
+.status-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+.status-btn {
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.status-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.status-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* The day/night toggle carries two moon icons - the current-coloured one for
+   Day mode and a white one for Night mode; only one is visible at a time. */
+#btn-day-mode .day-menu-icon { display: none; }
+body.light-mode #btn-day-mode .day-menu-icon { display: block; }
+body.light-mode #btn-day-mode .night-menu-icon { display: none; }
+
+/* --- Setting-change toast ---
+   Positioned inside #viewport-container, immediately right of the five 36px
+   view-mode buttons in #view-modes (12px inset plus four var(--space-4)
+   gaps). It used to be a screen-centered fixed toast that collided with the
+   transform-mode-bar; anchoring it beside the view modes keeps it clear at
+   any viewport width. */
+.toggle-message-toast {
+    position: absolute;
+    left: calc(12px + (5 * 36px) + (4 * var(--space-4)) + var(--space-8));
+    bottom: 12px;
+    transform: translateY(6px);
+    max-width: calc(100% - 220px);
+    padding: var(--space-8) var(--space-16);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+    color: var(--text-primary);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 10;
+}
+
+.toggle-message-toast.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* --- Backend connection dot, leftmost item in the status bar --- */
+.connection-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-secondary);
+    opacity: 0.6;
+    transition: background-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.connection-dot.connected {
+    background: #3ddc73;
+    opacity: 1;
+    box-shadow: 0 0 4px rgba(61, 220, 115, 0.7);
+}
+
+.connection-dot.disconnected {
+    background: #ff4d4d;
+    opacity: 1;
+    box-shadow: 0 0 4px rgba(255, 77, 77, 0.7);
+}
+
+/* --- WebKit scrollbar theming --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* --- Narrow-viewport media queries --- */
+@media (max-width: 768px) {
+    :root {
+        --panel-width: 220px;
+    }
+
+    .toolbar-btn span {
+        display: none;
+    }
+
+    .toolbar-btn {
+        padding: var(--space-6) var(--space-8);
+    }
+}
+
+@media (max-width: 512px) {
+    :root {
+        --panel-width: 0px;
+    }
+
+    #properties-panel {
+        display: none;
+    }
+}
+
+/* --- Drop-zone highlight while a dragged file is over the viewport --- */
+#viewport-container.drag-over .drop-zone {
+    opacity: 1;
+}
+
+#viewport-container.drag-over {
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
+}
+
+/* --- Right-click context menu --- */
+.context-menu {
+    position: fixed;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-4) 0;
+    min-width: 180px;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu-item {
+    padding: var(--space-8) var(--space-16);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-10);
+    transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: var(--space-4) 0;
+}
+
+/* --- Move/rotate/scale mode switcher bar --- */
+.transform-mode-bar {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: var(--space-4);
+    z-index: 10;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-4);
+}
+
+.transform-mode-bar.visible {
+    display: flex;
+}
+
+.transform-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    height: 32px;
+    padding: 0 var(--space-12);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.transform-mode-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.transform-mode-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.transform-mode-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.rotate-pivot-control {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    padding-left: var(--space-8);
+    border-left: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.rotate-pivot-control input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.rotate-pivot-control.hidden {
+    display: none;
+}
+
+/* --- Cut-plane split panel, docked at the top-right of the viewport --- */
+.split-mode-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    width: 210px;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-10);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.split-mode-panel.hidden {
+    display: none;
+}
+
+.split-mode-header {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #ff6644;
+    text-align: center;
+    margin-bottom: var(--space-8);
+}
+
+.split-mode-modes {
+    display: flex;
+    gap: var(--space-4);
+    margin-bottom: var(--space-10);
+}
+
+.split-mode-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-6) var(--space-4);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.split-mode-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.split-mode-btn.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.split-mode-actions {
+    display: flex;
+    gap: var(--space-6);
+}
+
+/* --- Per-axis move/rotate fields for the cut plane --- */
+.split-mode-fields-group {
+    margin-bottom: var(--space-10);
+}
+
+.split-mode-subheader {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-6);
+}
+
+.split-mode-fields {
+    display: flex;
+    gap: var(--space-6);
+}
+
+.split-tv-field {
+    /* .tv-field lays label and input out in a row, sized for the wider
+       transform-value-bar. Inside this 210px panel that row layout
+       overflows - the full-width input blows past its ~1/3 flex slot and
+       pushes the last field off the right edge. Stacking label above input
+       keeps every column contained. */
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex: 1;
+    gap: var(--space-4);
+    min-width: 0;
+}
+
+.split-tv-field label {
+    text-align: left;
+    min-width: 0;
+}
+
+.split-tv-field input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.split-mode-action-btn {
+    flex: 1;
+    padding: var(--space-6) 0;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transition: all 0.15s;
+}
+
+.split-mode-action-btn.secondary:hover {
+    background: var(--bg-active);
+}
+
+.split-mode-action-btn.primary {
+    background: #ff6644;
+    border-color: #ff6644;
+    color: #fff;
+}
+
+.split-mode-action-btn.primary:hover {
+    background: #ff7a5c;
+}
+
+/* --- X/Y/Z value bar floating just above the transform-mode switcher --- */
+.transform-value-bar {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: var(--space-8);
+    z-index: 10;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-8) var(--space-10);
+}
+
+.transform-value-bar.visible {
+    display: flex;
+}
+
+.tv-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+}
+
+.tv-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 14px;
+    text-align: center;
+}
+
+.tv-field input {
+    width: 70px;
+    height: 26px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 0 var(--space-6);
+}
+
+.tv-field input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.tv-field input:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Strip the native spin buttons off number inputs - they clutter the compact field layout (ColliBoy) */
+.tv-field input::-webkit-outer-spin-button,
+.tv-field input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.tv-field input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* --- Generic modal dialog chrome --- */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(2px);
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-dialog {
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    min-width: 360px;
+    max-width: 500px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    padding: var(--space-16) var(--space-20);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.modal-close {
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all 0.15s;
+}
+
+.modal-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: var(--space-20);
+}
+
+.modal-footer {
+    padding: var(--space-14) var(--space-20);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-8);
+}
+
+/* --- Form fields used inside modals --- */
+.form-group {
+    margin-bottom: var(--space-16);
+}
+
+.form-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: var(--space-6);
+}
+
+.form-input, .form-select {
+    width: 100%;
+    padding: var(--space-8) var(--space-12);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.form-input:focus, .form-select:focus {
+    border-color: var(--accent);
+}
+
+.form-range {
+    width: 100%;
+    accent-color: var(--accent);
+}
+
+.form-row {
+    display: flex;
+    gap: var(--space-12);
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+/* --- Primary/secondary modal buttons --- */
+.btn-primary {
+    padding: var(--space-8) var(--space-20);
+    background: var(--accent);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn-secondary {
+    padding: var(--space-8) var(--space-20);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+
+/* --- Text-to-geometry assistant dialog --- */
+.ai-modal-dialog {
+    min-width: 420px;
+}
+
+.ai-mode-toggle {
+    display: flex;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.ai-mode-btn {
+    flex: 1;
+    padding: var(--space-8) var(--space-12);
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ai-mode-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.ai-mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.ai-mode-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ai-mode-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: -8px 0 var(--space-12);
+}
+
+.ai-mode-hint.hidden {
+    display: none;
+}
+
+.ai-prompt-input {
+    resize: vertical;
+    min-height: 72px;
+    font-family: inherit;
+    line-height: 1.4;
+}
+
+/* OpenAI-compatible API config block (Provider Name / URL / API / Model Name) */
+.ai-openai-fields .form-row:last-of-type {
+    margin-bottom: var(--space-8);
+}
+
+.ai-openai-actions {
+    display: flex;
+    gap: var(--space-8);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary:disabled:hover {
+    background: transparent;
+    border-color: var(--border-color);
+}
+
+.modal-close:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* The idle Cancel/Generate pair and the in-progress bar occupy the same
+   footer slot - only one shows at a time; the generate flow in main.js
+   swaps between them. */
+.ai-idle-actions {
+    display: flex;
+    gap: var(--space-8);
+}
+
+.ai-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    flex: 1;
+}
+
+.ai-progress.hidden {
+    display: none;
+}
+
+.ai-progress-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-12);
+}
+
+.ai-progress-bar-container {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ai-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.ai-progress-bar.indeterminate {
+    width: 30% !important;
+    animation: progress-indeterminate 1.5s infinite ease-in-out;
+}
+
+.ai-progress-stop {
+    flex-shrink: 0;
+    padding: var(--space-6) var(--space-16);
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.ai-progress-stop:hover:not(:disabled) {
+    background: var(--error);
+    color: #fff;
+}
+
+.ai-progress-message {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    min-height: 15px;
+}
+
+/* --- Primitive shapes palette, dropped just below the toolbar --- */
+.primitives-palette {
+    position: absolute;
+    top: calc(var(--toolbar-height) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: var(--space-12);
+    display: none;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.primitives-palette.visible {
+    display: flex;
+    gap: var(--space-6);
+}
+
+.primitive-btn {
+    width: 64px;
+    height: 72px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    font-size: 10px;
+    transition: all 0.15s;
+}
+
+.primitive-btn svg {
+    width: 28px;
+    height: 28px;
+}
+
+.primitive-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+}
+
+.primitive-btn:active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+}
+
+/* --- Target-format chips for export --- */
+.export-formats {
+    display: flex;
+    gap: var(--space-8);
+    flex-wrap: wrap;
+}
+
+.format-chip {
+    padding: var(--space-6) var(--space-14);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+}
+
+.format-chip:hover, .format-chip.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+}
+
+/* --- One-click export presets --- */
+.export-presets {
+    display: flex;
+    gap: var(--space-8);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-14);
+}
+
+.preset-chip {
+    padding: var(--space-6) var(--space-12);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+}
+
+.preset-chip:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+}
+
+.preset-chip.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.preset-icon {
+    font-size: 13px;
+    color: var(--accent);
+}
+
+/* --- Save dialog: one selectable card per format --- */
+.save-formats {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.save-format-card {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-10);
+    padding: var(--space-10) var(--space-14);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.save-format-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+}
+
+.save-format-card.active {
+    background: var(--bg-active);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.save-format-name {
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.save-format-desc {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+/* --- Original vs. estimated stats shown while simplifying --- */
+.simplify-preview-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-10);
+    font-size: 13px;
+}
+
+.simplify-original {
+    color: var(--text-muted);
+}
+
+.simplify-estimated {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* --- Keyboard/mouse controls reference, two columns of shortcut rows --- */
+.controls-cheatsheet {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4) var(--space-8);
+    padding: var(--space-12) var(--space-14);
+}
+
+.cheatsheet-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    padding: var(--space-2) 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.cheatsheet-row kbd {
+    display: inline-block;
+    min-width: 52px;
+    text-align: center;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: var(--space-1) var(--space-4);
+    font-family: inherit;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.cheatsheet-row span {
+    flex: 1;
+}
+
+/* --- Hamburger-style app-menu toggle and its dropdown panel --- */
+.menu-toggle {
+    position: relative;
+}
+
+.app-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-4) 0;
+    min-width: 180px;
+    z-index: 500;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    display: none;
+}
+
+.app-dropdown.visible {
+    display: block;
+}
+
+.app-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-10);
+    padding: var(--space-8) var(--space-16);
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.1s;
+}
+
+.app-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+.app-menu-item svg {
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.app-menu-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: var(--space-4) 0;
+}
+
+/* --- Toolbar buttons kept in the DOM but hidden, so menu items can still trigger them --- */
+.toolbar-hidden-buttons {
+    display: none !important;
+}
+
+/* ==================================================
+   Aesthetic mode - off by default, flipped manually.
+   Strips every menu, toolbar and panel except the bottom
+   status bar (which goes solid black). The dramatic
+   viewport lighting (scene.setDramaticLighting) and the
+   vignette below are left untouched.
+   ================================================== */
+
+/* Suppress all chrome - menus, toolbars, panels - leaving only the status bar visible. */
+body.aesthetic-mode #toolbar,
+body.aesthetic-mode #properties-panel,
+body.aesthetic-mode .app-dropdown,
+body.aesthetic-mode .context-menu,
+body.aesthetic-mode .primitives-palette,
+body.aesthetic-mode .split-mode-panel,
+body.aesthetic-mode .transform-mode-bar,
+body.aesthetic-mode .transform-value-bar,
+body.aesthetic-mode #view-modes,
+body.aesthetic-mode #grid-snap-controls,
+body.aesthetic-mode #build-plate-controls {
+    display: none !important;
+}
+
+/* With the toolbar collapsed out of flow, zeroing --toolbar-height lets
+   #main-content grow into the freed space - its height derives from this
+   token, not the toolbar's real (display:none) box. */
+body.aesthetic-mode {
+    --toolbar-height: 0px;
+}
+
+/* The status bar remains on screen but goes fully black. */
+body.aesthetic-mode #status-bar {
+    background: #000 !important;
+    border-color: #000;
+}
+
+/* Keep status-bar glyphs in near-black grey to match the monochrome
+   palette of aesthetic mode. */
+body.aesthetic-mode .status-btn {
+    color: var(--aesthetic-text) !important;
+}
+
+/* Active status toggles get a faint halo for extra drama */
+body.aesthetic-mode .status-btn.active {
+    box-shadow: 0 0 12px var(--aesthetic-glow);
+}
+
+#btn-aesthetic-mode.active {
+    box-shadow: 0 0 10px var(--aesthetic-glow);
+}
+
+/* Radial vignette darkening the viewport edges for a cinematic frame */
+#viewport-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.45) 100%);
+    z-index: 5;
+}
+
+body.aesthetic-mode #viewport-container::after {
+    opacity: 1;
+}
+
+

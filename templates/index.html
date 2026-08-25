@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<!-- ColliBoy - main app shell: toolbar, viewport overlays, properties panel, status bar -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web 3D Builder</title>
+
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+
+    <!-- Wordmark display face; preconnects keep the font fetch off the critical path -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/css/app.css">
+
+    <!-- Pinned CDN build so bare "three" imports resolve without a bundler -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <!-- Action bar: file menu, mesh operations, and view toggles grouped by function -->
+    <div id="toolbar">
+        <div class="toolbar-group" style="position:relative;">
+            <button id="btn-menu" type="button" title="Menu" class="toolbar-btn menu-toggle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+            <div id="app-menu" class="app-dropdown">
+                <button class="app-menu-item" data-action="menu-new">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                    <span>New</span>
+                </button>
+                <button class="app-menu-item" data-action="menu-open">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span>Open</span>
+                </button>
+                <div class="app-menu-divider"></div>
+                <button class="app-menu-item" data-action="menu-save">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    <span>Save</span>
+                </button>
+                <div class="app-menu-divider"></div>
+                <button class="app-menu-item" data-action="menu-import">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span>Import</span>
+                </button>
+                <button class="app-menu-item" data-action="menu-export">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>Export</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Suppressed duplicates of toolbar actions; the app menu re-dispatches clicks onto them -->
+        <div class="toolbar-group toolbar-hidden-buttons">
+            <button id="btn-import" title="Import (Ctrl+O)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Import</span>
+            </button>
+            <button id="btn-export" title="Export" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export</span>
+            </button>
+        </div>
+
+        <div class="toolbar-group toolbar-hidden-buttons">
+            <button id="btn-new" title="New Project" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                <span>New</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-hollow" title="Hollow" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+                <span>Hollow</span>
+            </button>
+            <button id="btn-solid" title="Solid" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+                <span>Solid</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-copy" title="Copy (Ctrl+C)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <span>Copy</span>
+            </button>
+            <button id="btn-cut" title="Cut (Ctrl+X)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                <span>Cut</span>
+            </button>
+            <button id="btn-paste" title="Paste (Ctrl+V)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                <span>Paste</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-split" title="Split (slices model into two pieces)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                <span>Split</span>
+            </button>
+            <button id="btn-union" title="Merge / Union" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="6" fill="currentColor" opacity="0.3"/><circle cx="15" cy="15" r="6" fill="currentColor" opacity="0.3"/></svg>
+                <span>Merge</span>
+            </button>
+            <button id="btn-subtract" title="Subtract (selected shape(s) are cut from every shape they overlap)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="6" fill="currentColor" opacity="0.3"/><circle cx="15" cy="15" r="6" fill="currentColor" opacity="0.3"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Subtract</span>
+            </button>
+            <button id="btn-intersect" title="Intersect" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="6" fill="currentColor" opacity="0.3"/><circle cx="15" cy="15" r="6" fill="currentColor" opacity="0.3"/><path d="M9 9h6v6H9z" fill="currentColor" opacity="0.5"/></svg>
+                <span>Intersect</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-simplify" title="Simplify" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                <span>Simplify</span>
+            </button>
+            <button id="btn-smooth" title="Smooth" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                <span>Smooth</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-fillet" title="Fillet edges (rounded)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h6a9 9 0 0 0 9-9V3"/><line x1="3" y1="21" x2="3" y2="3"/></svg>
+                <span>Fillet</span>
+            </button>
+            <button id="btn-chamfer" title="Chamfer edges (beveled)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h6l12-12H3z"/></svg>
+                <span>Chamfer</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-separate" title="Separate (splits disconnected pieces into their own models)" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4"/><circle cx="17" cy="17" r="4"/><line x1="10.2" y1="9.8" x2="13.8" y2="13.8" stroke-dasharray="2 2"/></svg>
+                <span>Separate</span>
+            </button>
+        </div>
+
+        <div class="toolbar-spacer"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-primitives" title="Add Primitives" class="toolbar-btn primitives-trigger">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                <span>Primitives</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-snap-center" title="Snap to Center" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                <span>Snap Center</span>
+            </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+            <button id="btn-ai" title="AI Mode - create or edit shapes from a text description" class="toolbar-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l1.8 4.6L18 8l-4.2 1.4L12 14l-1.8-4.6L6 8l4.2-1.4z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+                <span>AI</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Text-to-shape dialog: create mode builds an object from a prompt, edit mode reworks one selected shape -->
+    <div id="ai-modal" class="modal-overlay hidden">
+        <div class="modal-dialog ai-modal-dialog">
+            <div class="modal-header">
+                <span class="modal-title">AI Mode</span>
+                <button id="btn-ai-close" class="modal-close" type="button" title="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="ai-mode-toggle">
+                    <button type="button" id="ai-mode-create" class="ai-mode-btn active" data-mode="create">Create</button>
+                    <button type="button" id="ai-mode-edit" class="ai-mode-btn" data-mode="edit" disabled title="Select exactly one shape to edit it with AI">Edit</button>
+                </div>
+                <p id="ai-mode-hint" class="ai-mode-hint hidden">Select exactly one shape in the scene to edit it with AI.</p>
+
+                <div class="form-group">
+                    <label class="form-label" for="ai-prompt-input" id="ai-prompt-label">Describe the shape you want</label>
+                    <textarea id="ai-prompt-input" class="form-input ai-prompt-input" rows="4" placeholder="e.g. a hexagonal bolt with an M6 thread hole through the center"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="ai-model-select">Model</label>
+                    <select id="ai-model-select" class="form-select">
+                        <option value="">Loading models…</option>
+                    </select>
+                </div>
+
+                <!-- OpenAI-compatible API config, shown when "* Add OpenAI API *" or a saved provider json is selected -->
+                <div id="ai-openai-fields" class="form-group ai-openai-fields hidden">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="ai-provider-name">Provider Name</label>
+                            <input type="text" id="ai-provider-name" class="form-input" placeholder="e.g. OpenAI">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="ai-provider-url">URL</label>
+                            <input type="text" id="ai-provider-url" class="form-input" placeholder="https://api.openai.com/v1">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="ai-provider-api">API</label>
+                            <input type="text" id="ai-provider-api" class="form-input" placeholder="optional - defaults to none">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="ai-provider-model">Model Name</label>
+                            <input type="text" id="ai-provider-model" class="form-input" placeholder="e.g. gpt-4o">
+                        </div>
+                    </div>
+                    <div class="ai-openai-actions">
+                        <button id="btn-ai-provider-save" class="btn-primary" type="button">Save</button>
+                        <button id="btn-ai-provider-delete" class="btn-secondary" type="button">Delete</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div id="ai-idle-actions" class="ai-idle-actions">
+                    <button id="btn-ai-cancel" class="btn-secondary" type="button">Cancel</button>
+                    <button id="btn-ai-generate" class="btn-primary" type="button">Generate</button>
+                </div>
+                <div id="ai-progress" class="ai-progress hidden">
+                    <div class="ai-progress-row">
+                        <div class="ai-progress-bar-container">
+                            <div id="ai-progress-bar" class="ai-progress-bar indeterminate"></div>
+                        </div>
+                        <button id="btn-ai-stop" class="btn-secondary ai-progress-stop" type="button">Stop</button>
+                    </div>
+                    <p id="ai-progress-message" class="ai-progress-message">Starting…</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick-add panel for the six built-in shapes, hung centered below the toolbar -->
+    <div id="primitives-palette" class="primitives-palette">
+        <button class="primitive-btn" data-type="cube" title="Cube">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <span>Cube</span>
+        </button>
+        <button class="primitive-btn" data-type="sphere" title="Sphere">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="10" ry="4"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/></svg>
+            <span>Sphere</span>
+        </button>
+        <button class="primitive-btn" data-type="cylinder" title="Cylinder">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            <span>Cylinder</span>
+        </button>
+        <button class="primitive-btn" data-type="cone" title="Cone">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L3 20h18L12 2z"/><ellipse cx="12" cy="20" rx="9" ry="2"/></svg>
+            <span>Cone</span>
+        </button>
+        <button class="primitive-btn" data-type="torus" title="Torus">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="12" rx="10" ry="6"/><ellipse cx="12" cy="12" rx="4" ry="2"/></svg>
+            <span>Torus</span>
+        </button>
+        <button class="primitive-btn" data-type="egg" title="Egg">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22c4.5 0 7-4.2 7-9 0-6-3.5-11-7-11S5 7 5 13c0 4.8 2.5 9 7 9z"/></svg>
+            <span>Egg</span>
+        </button>
+    </div>
+
+    <div id="main-content">
+        <!-- WebGL canvas plus every floating overlay docked to it -->
+        <div id="viewport-container">
+            <canvas id="viewport-canvas"></canvas>
+
+            <!-- Shading-style toggles, docked bottom-left of the viewport -->
+            <div id="view-modes">
+                <button id="btn-wireframe-toggle" title="Wireframe" class="view-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                </button>
+                <button id="btn-transparent-toggle" title="Transparent" class="view-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 0 20"/></svg>
+                </button>
+                <button id="btn-wireframe-hybrid-toggle" title="Wireframe Hybrid - surface + wireframe together" class="view-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" fill="currentColor" fill-opacity="0.25" stroke-opacity="0.5"/><line x1="3" y1="9" x2="21" y2="9" stroke-opacity="0.9"/><line x1="3" y1="15" x2="21" y2="15" stroke-opacity="0.9"/><line x1="9" y1="3" x2="9" y2="21" stroke-opacity="0.9"/><line x1="15" y1="3" x2="15" y2="21" stroke-opacity="0.9"/></svg>
+                </button>
+                <button id="btn-shading-toggle" title="Smooth Shading (off - flat/faceted shading is default)" class="view-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" fill-opacity="0.35" stroke="none"/></svg>
+                </button>
+                <button id="btn-even-lighting" title="Even Lighting (off)" class="view-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="5.2" y1="9" x2="18.8" y2="9"/><line x1="5.2" y1="15" x2="18.8" y2="15"/></svg>
+                </button>
+            </div>
+
+            <!-- Setting-change toast beside the shading toggles; auto-hides after 10 s and is suppressed while muting is active -->
+            <div id="toggle-message" class="toggle-message-toast" role="status" aria-live="polite"></div>
+
+            <!-- Plane move/rotate controls, visible only while a split is armed (ColliBoy) -->
+            <div id="split-mode-panel" class="split-mode-panel hidden">
+                <div class="split-mode-header">SPLIT</div>
+                <div class="split-mode-modes">
+                    <button id="btn-split-mode-move" title="Move split plane" class="split-mode-btn active">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+                        <span>Move</span>
+                    </button>
+                    <button id="btn-split-mode-rotate" title="Rotate split plane" class="split-mode-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <span>Rotate</span>
+                    </button>
+                </div>
+                <div class="split-mode-fields-group">
+                    <div class="split-mode-subheader">Move (mm)</div>
+                    <div class="split-mode-fields">
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-move-x">X</label>
+                            <input type="number" id="split-input-move-x" step="0.1">
+                        </div>
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-move-y">Y</label>
+                            <input type="number" id="split-input-move-y" step="0.1">
+                        </div>
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-move-z">Z</label>
+                            <input type="number" id="split-input-move-z" step="0.1">
+                        </div>
+                    </div>
+                </div>
+                <div class="split-mode-fields-group">
+                    <div class="split-mode-subheader">Rotate (&deg;)</div>
+                    <div class="split-mode-fields">
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-rotate-x">X</label>
+                            <input type="number" id="split-input-rotate-x" step="1">
+                        </div>
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-rotate-y">Y</label>
+                            <input type="number" id="split-input-rotate-y" step="1">
+                        </div>
+                        <div class="tv-field split-tv-field">
+                            <label for="split-input-rotate-z">Z</label>
+                            <input type="number" id="split-input-rotate-z" step="1">
+                        </div>
+                    </div>
+                </div>
+                <div class="split-mode-actions">
+                    <button id="btn-split-cancel" class="split-mode-action-btn secondary">Cancel</button>
+                    <button id="btn-split-ok" class="split-mode-action-btn primary">OK</button>
+                </div>
+            </div>
+
+
+            <!-- Numeric position entry; appears above the mode bar once an object is selected -->
+            <div id="transform-value-bar" class="transform-value-bar">
+                <div class="tv-field">
+                    <label id="tv-label-x" for="tv-input-x">X</label>
+                    <input type="number" id="tv-input-x" step="0.1">
+                </div>
+                <div class="tv-field">
+                    <label id="tv-label-y" for="tv-input-y">Y</label>
+                    <input type="number" id="tv-input-y" step="0.1">
+                </div>
+                <div class="tv-field">
+                    <label id="tv-label-z" for="tv-input-z">Z</label>
+                    <input type="number" id="tv-input-z" step="0.1">
+                </div>
+                <label id="rotate-pivot-control" class="rotate-pivot-control hidden" title="Choose the point shapes rotate around">
+                    <input type="checkbox" id="chk-rotate-pivot-center" checked>
+                    <span>Center</span>
+                </label>
+                <label id="scale-ratio-control" class="rotate-pivot-control hidden" title="Keep aspect ratio - scaling one axis resizes the others proportionally">
+                    <input type="checkbox" id="chk-lock-ratio">
+                    <span>Lock Ratio</span>
+                </label>
+            </div>
+
+            <!-- Move/scale/rotate gizmo modes, docked bottom-center -->
+            <div id="transform-mode-bar" class="transform-mode-bar">
+                <button id="btn-mode-scale" title="Scale" class="transform-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    <span>Scale</span>
+                </button>
+                <button id="btn-mode-move" title="Move" class="transform-mode-btn active">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+                    <span>Move</span>
+                </button>
+                <button id="btn-mode-rotate" title="Rotate" class="transform-mode-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    <span>Rotate</span>
+                </button>
+            </div>
+
+            <!-- Snap toggle and grid-size picker; revealed only while snapping is on -->
+            <div id="grid-snap-controls" style="display:none;position:absolute;bottom:12px;left:56px;gap:4px;z-index:10;">
+                <button id="btn-grid-snap" title="Toggle Grid Snap" class="view-mode-btn" style="font-size:10px;padding:2px 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </button>
+                <select id="btn-grid-size" title="Grid snap size (mm)" class="view-mode-btn" style="width:auto;padding:0 6px;font-size:10px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);cursor:pointer;">
+                    <option value="0.5">0.5mm</option>
+                    <option value="1" selected>1mm</option>
+                    <option value="2">2mm</option>
+                    <option value="5">5mm</option>
+                    <option value="10">10mm</option>
+                </select>
+            </div>
+
+            <!-- Axis, plate, and drag-snap switches, docked bottom-right and always on screen -->
+            <div id="build-plate-controls" style="display:flex;position:absolute;bottom:12px;right:12px;gap:4px;z-index:10;">
+                <button id="btn-axis-toggle" title="Toggle Axis Lines" class="view-mode-btn active" style="font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="12" y1="21" x2="12" y2="3" stroke="#4d94ff"/><line x1="3" y1="18" x2="19" y2="18" stroke="#ff4d4d"/><line x1="12" y1="18" x2="21" y2="9" stroke="#4dff88"/></svg>
+                </button>
+                <button id="btn-infinite-plate" title="Infinite Build Plate (auto-scales to fit all objects)" class="view-mode-btn active" style="font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 3 3 3 3 8"/><polyline points="16 3 21 3 21 8"/><polyline points="8 21 3 21 3 16"/><polyline points="16 21 21 21 21 16"/></svg>
+                </button>
+                <button id="btn-simple-plate" title="Simple Plate (stretch the plate instead of rebuilding it)" class="view-mode-btn" style="font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M18 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M5 21H2a2 2 0 0 1-2-2v-3"/></svg>
+                </button>
+                <button id="btn-plate-toggle" title="Toggle Build Plate" class="view-mode-btn active" style="font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                </button>
+                <button id="btn-smart-snap" title="Snap while dragging - move: edges/centers snap to nearby shapes within 1% of size, rotate: 45° increments (within 5°)" class="smart-snap-btn active">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v7a6 6 0 0 0 12 0V3"/><path d="M6 21v-7"/><path d="M18 21v-7"/><line x1="3" y1="3" x2="9" y2="3"/><line x1="15" y1="3" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="21"/><line x1="15" y1="21" x2="21" y2="21"/></svg>
+                    <span>Snap</span>
+                </button>
+            </div>
+
+            <!-- Empty-state import prompt; reframes the camera to default view when it appears -->
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-box">
+                    <button id="btn-dropzone-close" class="modal-close drop-zone-close" type="button" title="Close">&times;</button>
+                    <button id="btn-import-dropzone" class="drop-zone-icon-btn" type="button" title="Import">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    </button>
+                    <p>Drag &amp; drop a 3D model here</p>
+                    <p class="drop-zone-sub">or click Import to browse files</p>
+                    <div class="import-format-badges">
+                        <span class="format-badge" title="Stereolithography - most common 3D printing format">STL</span>
+                        <span class="format-badge" title="Wavefront OBJ - supports normals, texture coords, materials">OBJ</span>
+                        <span class="format-badge" title="Polygon File Format - supports vertex colors">PLY</span>
+                        <span class="format-badge" title="GL Binary - compact GLTF binary format">GLB</span>
+                        <span class="format-badge" title="GL Text - JSON-based 3D delivery format">GLTF</span>
+                        <span class="format-badge" title="3D Manufacturing Format - preserves colors &amp; metadata">3MF</span>
+                        <span class="format-badge" title="Filmbox - Autodesk exchange format">FBX</span>
+                        <span class="format-badge" title="Discreet 3D - mesh data only">DRC</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Busy indicator with spinner and progress bar during long operations -->
+            <div id="loading-overlay" class="loading-overlay hidden">
+                <div class="spinner"></div>
+                <p id="loading-text">Processing...</p>
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Object list, live properties for the selection, and a keyboard cheatsheet; each section collapses on header click -->
+        <div id="properties-panel">
+            <div class="panel-section" data-panel-section="scene-objects">
+                <button type="button" class="panel-header panel-toggle" aria-expanded="true" aria-controls="object-list">
+                    <span>Scene Objects</span>
+                    <svg class="panel-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div id="object-list" class="object-list panel-section-body">
+                    <div class="object-list-empty">No models loaded</div>
+                </div>
+            </div>
+
+            <div class="panel-section panel-section-grow" data-panel-section="properties">
+                <button type="button" class="panel-header panel-toggle" aria-expanded="true" aria-controls="properties-content">
+                    <span>Properties</span>
+                    <svg class="panel-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div id="properties-content" class="panel-body panel-section-body">
+                    <div class="no-selection">Select an object to view properties</div>
+                </div>
+            </div>
+
+            <!-- Keyboard cheatsheet, two columns of shortcut rows anchored below the properties box -->
+            <div class="panel-section" data-panel-section="controls">
+                <button type="button" class="panel-header panel-toggle" aria-expanded="true" aria-controls="controls-cheatsheet">
+                    <span>Controls</span>
+                    <svg class="panel-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div id="controls-cheatsheet" class="controls-cheatsheet panel-section-body">
+                    <div class="cheatsheet-row"><kbd>Ctrl+O</kbd><span>Import</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+S</kbd><span>Save</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+C</kbd><span>Copy</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+X</kbd><span>Cut</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+V</kbd><span>Paste</span></div>
+                    <div class="cheatsheet-row"><kbd>Del</kbd><span>Delete</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+A</kbd><span>Select All</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+D</kbd><span>Deselect All</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+Z</kbd><span>Undo</span></div>
+                    <div class="cheatsheet-row"><kbd>Ctrl+Y</kbd><span>Redo</span></div>
+                    <div class="cheatsheet-row"><kbd>Esc</kbd><span>Cancel</span></div>
+                </div>
+            </div>
+
+            <!-- Ad banner, pinned to the bottom of the right-hand menu; hidden while its host is unreachable -->
+            <div class="panel-banner" id="ad-banner">
+                <iframe src="https://ads.colliboy.com" title="ColliBoy ad"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection state, live mesh stats, and view/render toggles -->
+    <div id="status-bar">
+        <div class="status-brand" aria-hidden="true">
+            <img src="/static/img/logo.svg" alt="" class="status-brand-logo logo-day">
+            <img src="/static/img/dark_logo.svg" alt="" class="status-brand-logo logo-night">
+            <span class="status-brand-text"><span class="brand-bold">3D</span><span class="brand-regular">/easy</span></span>
+        </div>
+        <span id="connection-status" class="connection-dot" title="Checking backend connection…"></span>
+        <div class="status-item">
+            <span id="dim-x">0.0 mm</span> &times;
+            <span id="dim-y">0.0 mm</span> &times;
+            <span id="dim-z">0.0 mm</span>
+        </div>
+        <button id="btn-unit-toggle" title="Toggle Unit" class="status-btn" style="font-size:10px;font-weight:600;width:auto;padding:0 8px;">mm</button>
+        <div class="status-divider"></div>
+        <div id="poly-count" class="status-item">Faces: 0</div>
+        <div id="vertex-count" class="status-item">Vertices: 0</div>
+        <div class="status-spacer"></div>
+        <span id="render-stats" class="status-item hidden" style="font-size:10px;color:#8899aa;"></span>
+        <button id="btn-lod-toggle" title="Toggle LOD (auto detail based on distance)" class="status-btn active">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 12 15 2 8.5 12 2"/><polyline points="2 15.5 12 22 22 15.5"/></svg>
+        </button>
+        <button id="btn-render-stats-toggle" title="Toggle Render Stats" class="status-btn" style="font-size:10px;font-weight:600;width:auto;padding:0 8px;">⚡</button>
+        <button id="btn-reset-view" title="Reset View" class="status-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+        <button id="btn-mute-messages" title="Toggle setting-change messages" class="status-btn active">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </button>
+        <button id="btn-aesthetic-mode" title="Toggle Aesthetic Mode" class="status-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="btn-day-mode" title="Toggle Day/Night Mode" class="status-btn">
+            <svg class="day-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="night-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+    </div>
+
+    <!-- Off-screen picker that every import path funnels through -->
+    <input type="file" id="file-input" accept=".stl,.obj,.fbx,.ply,.3mf,.glb,.gltf,.drc" multiple hidden>
+
+    <!-- Single module entry point; all DOM wiring and viewport logic lives in main.js -->
+    <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
