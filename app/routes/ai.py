@@ -1,39 +1,29 @@
 """Generation blueprint: model-driven geometry jobs with live progress.
 
-Routes, mounted under whatever url_prefix the app factory gives this
-blueprint (the rest of the codebase mounts blueprints at '/api/...' paths -
-mount this one at the prefix main.js's APIClient uses for generation):
+Routes (mount under the prefix main.js's APIClient uses for generation):
 
     GET  /models          -> {'models': [<gguf filenames in ai/models>],
-                               'providers': [{file, provider_name, url,
-                                              api_key, model_name}, ...]}
-    POST /provider        -> saves an OpenAI-compatible API config as a json
-                              file in ai/models (updates the named file when
-                              given one, otherwise mints <name>_<model>.json
-                              with an incrementing index on duplicates)
+                               'providers': [{file, provider_name, url, api_key, model_name}, ...]}
+    POST /provider        -> saves an OpenAI-compatible API config as a json file in ai/models
+                              (updates the named file if given; else mints <name>_<model>.json)
     DELETE /provider/<f>  -> deletes a saved provider json config
     POST /cleanup         -> sweeps residual job folders from ai/input + ai/output
-                               (called when AI mode is first opened; no-op when
-                               cleanup_enabled = false in .config)
     POST /generate        -> starts a background job, returns {'job_id': ...}
     GET  /status/<job_id> -> current progress, or the finished result/error
     POST /cancel/<job_id> -> asks a running job to stop
 
-Generation runs ai/run_agent.py as a subprocess on a worker thread instead of
-blocking the request: slow hardware can take minutes per iteration, and a
-single blocking HTTP call has no way to report progress or be cancelled
-mid-flight. The frontend polls /status/<job_id> to drive its progress bar and
-can hit /cancel/<job_id> (Stop button) to kill the subprocess without racing
-the generate request itself.
+Generation runs ai/run_agent.py as a subprocess on a worker thread so slow
+hardware can take minutes per iteration without blocking the request; the
+frontend polls /status/<job_id> for progress and hits /cancel/<job_id> (Stop)
+to kill the subprocess.
 
-Two backends: local .gguf files in ai/models (default), or an OpenAI-
-compatible REST API described by a saved provider json config - when /generate
-receives a 'provider' payload it passes --api-url/--model-name (and optional
---api-key) to the runner instead of a local model path.
+Two backends: local .gguf files in ai/models (default), or an OpenAI-compatible
+REST API from a saved provider json config - with a 'provider' payload,
+/generate passes --api-url/--model-name (and optional --api-key) to the runner
+instead of a local model path.
 
-Depends on app.models.session.store exposing get_object, add_object,
-remove_object, and get_or_create_session - the same interface used by
-primitives.py and csg.py.
+Depends on app.models.session.store exposing get_object, add_object, remove_object,
+and get_or_create_session - the same interface used by primitives.py and csg.py.
 """
 # ColliBoy
 import json
@@ -55,8 +45,8 @@ from app.settings import load_settings
 
 bp = Blueprint('ai', __name__)
 
-# this module sits in app/routes; AI_ROOT resolves up to the project's
-# top-level ai/ folder (models/, prompts/, input/, output/, run_agent.py)
+# This module lives in app/routes; AI_ROOT points at the project's top-level
+# ai/ folder (models/, prompts/, input/, output/, run_agent.py).
 from app.paths import project_root
 PROJECT_ROOT = project_root()
 AI_ROOT = os.path.join(PROJECT_ROOT, 'ai')
@@ -66,20 +56,18 @@ INPUT_DIR = os.path.join(AI_ROOT, 'input')
 OUTPUT_DIR = os.path.join(AI_ROOT, 'output')
 RUNNER_SCRIPT = os.path.join(AI_ROOT, 'run_agent.py')
 
-# In-memory job table: one entry per /generate call's background subprocess.
-# Guarded by _jobs_lock because both the request thread (starting or
-# cancelling a job) and the job's own worker thread touch it. Nothing is
-# persisted - a server restart drops in-flight jobs.
+# In-memory job table, one entry per /generate subprocess; guarded by
+# _jobs_lock since request threads (start/cancel) and the job's worker thread
+# both touch it. Nothing is persisted - a restart drops in-flight jobs.
 _jobs_lock = threading.Lock()
 _jobs = {}
 
-# How long a finished entry lingers after completion, so a frontend poll
-# landing just after the job ends still finds it instead of hitting a 404.
+# How long a finished entry lingers, so a poll landing just after the job
+# ends still finds it instead of a 404.
 _JOB_RETENTION_SECONDS = 300
 
 # Matches the runner's "PROGRESS: stage|iteration|max|message" lines
-# (iteration/max may be blank), which drive the progress bar without a
-# custom IPC channel.
+# (iteration/max may be blank); drives the progress bar without an IPC channel.
 _PROGRESS_RE = re.compile(r'^PROGRESS:\s*(.*)$')
 
 
@@ -163,7 +151,7 @@ def _list_providers():
             with open(path, 'r', encoding='utf-8') as fh:
                 data = json.load(fh)
         except Exception:
-            # Corrupt/unreadable file - skip it rather than failing the whole list.
+            # Skip corrupt files rather than failing the whole list.
             continue
         providers.append({
             'file': f,
@@ -176,19 +164,17 @@ def _list_providers():
 
 
 def _cleanup_enabled():
-    """Whether AI mode scratch cleanup is on (.config [ai_generation] cleanup_enabled).
-
-    Read at call time so editing .config takes effect without a restart, the same
-    way /generate reads its tuning values."""
+    """Whether scratch cleanup is on (.config [ai_generation] cleanup_enabled); read at
+    call time so edits to .config take effect without a restart."""
     return bool(load_settings().get('ai_generation', {}).get('cleanup_enabled', True))
 
 
 def _sweep_residual_dirs():
-    """Delete job scratch dirs in ai/input + ai/output that don't belong to a running job.
+    """Delete job scratch dirs in ai/input + ai/output not owned by a running job.
 
-    Per-job cleanup only runs while this server process is alive, so jobs whose
-    server died mid-run (crash/restart) leave their folders behind; this sweep
-    removes those leftovers. Dirs of currently running jobs are left alone."""
+    Per-job cleanup only runs while the server is alive, so crashed/restarted
+    servers leave folders behind; this sweep removes those leftovers while
+    leaving running jobs' dirs alone."""
     with _jobs_lock:
         active = set()
         for job in _jobs.values():
@@ -212,11 +198,9 @@ def _sweep_residual_dirs():
 
 @bp.route('/cleanup', methods=['POST'])
 def cleanup_scratch():
-    """Sweep residual job folders from ai/input + ai/output.
-
-    The frontend calls this when AI mode is first opened so leftovers from a
-    crashed run don't linger on disk. No-op (and reported as such) when the
-    user disabled cleanup in .config."""
+    """Sweep residual job folders from ai/input + ai/output; called by the frontend
+    when AI mode is first opened so leftovers from a crashed run don't linger.
+    No-op (reported as such) when cleanup is disabled in .config."""
     if not _cleanup_enabled():
         return jsonify({'removed': 0, 'cleanup_enabled': False})
     removed = _sweep_residual_dirs()
@@ -251,8 +235,8 @@ def save_provider():
 
     os.makedirs(MODELS_DIR, exist_ok=True)
 
-    # When the frontend names an existing config file, update it in place;
-    # otherwise mint a fresh <provider>_<model>.json (indexed on duplicates).
+    # Update the named config file in place if given; else mint a fresh
+    # <provider>_<model>.json (indexed on duplicates).
     existing_file = _safe_provider_file(data.get('file'))
     if existing_file and os.path.isfile(os.path.join(MODELS_DIR, existing_file)):
         file_name = existing_file
@@ -355,9 +339,9 @@ def generate():
     session_id = data.get('session_id')
     object_id = data.get('object_id')
 
-    # Optional OpenAI-compatible API routing: when the frontend sends a filled-in
-    # provider payload, the runner talks to that REST endpoint instead of loading
-    # a local .gguf file. api_key may be blank/'none' for keyless local servers.
+    # Optional OpenAI-compatible API routing: with a filled-in provider payload
+    # the runner talks to that REST endpoint instead of a local .gguf file;
+    # api_key may be blank/'none' for keyless local servers.
     provider = data.get('provider') if isinstance(data.get('provider'), dict) else None
     provider_url = str(provider.get('url') or '').strip() if provider else ''
     provider_model = str(provider.get('model_name') or '').strip() if provider else ''
@@ -402,8 +386,8 @@ def generate():
 
     _prune_old_jobs()
 
-    # Per-job scratch dirs keep two concurrent generations from stomping on
-    # each other's files while the first is still winding down.
+    # Per-job scratch dirs keep concurrent generations from stomping on each
+    # other's files while one is still winding down.
     job_id = uuid.uuid4().hex[:12]
     job_input_dir = os.path.join(INPUT_DIR, job_id)
     job_output_dir = os.path.join(OUTPUT_DIR, job_id)
@@ -416,8 +400,8 @@ def generate():
         _write_binary_stl(input_path, input_vertices, input_tris)
 
     cmd = _runner_command() + [
-        # -u (when using python3) keeps stdout/stderr unbuffered so PROGRESS lines
-        # reach us line-by-line in real time instead of sitting in a buffer.
+        # -u (with python3) keeps output unbuffered so PROGRESS lines arrive
+        # line-by-line in real time.
         '--mode', mode,
     ]
     if use_api:
@@ -434,9 +418,9 @@ def generate():
     if input_path:
         cmd += ['--input-path', input_path]
 
-    # Generation tuning from .config ([ai_generation]): per-turn token budget, max
-    # build/fix cycles, and an optional reasoning level for the API model. Read at
-    # request time so editing .config takes effect on the next generation.
+    # Generation tuning from .config ([ai_generation]): per-turn token budget,
+    # max build/fix cycles, and an optional reasoning level; read at request
+    # time so edits to .config take effect on the next generation.
     gen = load_settings().get('ai_generation', {})
     cmd += [
         '--max-tokens', str(int(gen.get('max_tokens_per_turn', 4096))),
@@ -499,8 +483,8 @@ def cancel_job(job_id):
         if job is None:
             return jsonify({'error': 'unknown job'}), 404
         if job['status'] != 'running':
-            # Already finished/cancelled/errored - nothing to do, but not an
-            # error either; the Stop button and the poll loop can race.
+            # Already finished/cancelled/errored - a no-op, since the Stop
+            # button and the poll loop can race.
             return jsonify({'status': job['status']})
         job['cancel_requested'] = True
         proc = job.get('proc')
@@ -513,8 +497,8 @@ def cancel_job(job_id):
 
         def _force_kill():
             # Give the subprocess a few seconds to exit after SIGTERM (it may
-            # be mid-token-generation); escalate if it lingers, so a stuck
-            # process cannot block the Stop button.
+            # be mid-token-generation), then escalate so a stuck process can't
+            # block the Stop button.
             time.sleep(5)
             if proc.poll() is None:
                 try:
@@ -531,8 +515,8 @@ def _failure_detail(log_tail):
     """Reduce the runner's output tail to a short reason for the frontend alert.
 
     PROGRESS lines are machine noise (the progress bar already consumed them),
-    so keep only the last few real output lines - in failure cases that is the
-    runner's own one-line explanation of what went wrong."""
+    so keep only the last few real lines - in failure cases that is the
+    runner's own explanation of what went wrong."""
     lines = [ln.strip() for ln in log_tail if ln.strip() and not ln.startswith('PROGRESS:')]
     return '\n'.join(lines[-3:])[:1000] or 'AI generation failed'
 
@@ -544,8 +528,7 @@ def _run_generation_job(job_id, cmd):
             cmd,
             stdout=subprocess.PIPE,
             # Merge stderr into stdout: one ordered stream of everything the
-            # runner (and llama.cpp underneath it) prints, echoed live to
-            # this server's console as it happens.
+            # runner (and llama.cpp under it) prints, echoed live to our console.
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
@@ -680,8 +663,8 @@ def _finish_job(job_id, status, result=None, error=None):
         input_dir = job.get('input_dir')
         output_dir = job.get('output_dir')
 
-    # Scratch dirs are per-job, so removing them here cannot touch another
-    # in-flight job's files. Skipped entirely when cleanup is disabled in .config.
+    # Scratch dirs are per-job, so this can't touch another in-flight job's
+    # files; skipped entirely when cleanup is disabled in .config.
     if _cleanup_enabled():
         if input_dir:
             shutil.rmtree(input_dir, ignore_errors=True)

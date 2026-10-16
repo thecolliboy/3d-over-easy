@@ -10,13 +10,9 @@ export class ObjectListPanel {
     }
 
     /**
-     * "Scene Objects" thumbnail panel - right sidebar, above Properties.
-     * One button per loaded model: a rendered preview image plus its name;
-     * clicking toggles that model's selection. The list is rebuilt whenever
-     * an object is added or removed (the hooks wrap SceneController's own
-     * addObject/removeObject, so every code path that mutates the scene keeps
-     * the panel correct), and refreshed on selection-only changes via the
-     * updatePropertiesPanel wrapper.
+     * Build the panel and keep it in sync: hooks wrap SceneController's own
+     * addObject/removeObject so every scene mutation rebuilds the list, while
+     * selection-only changes refresh via the updatePropertiesPanel wrapper.
      */
     init() {
         const app = this.app;
@@ -24,6 +20,10 @@ export class ObjectListPanel {
         const ui = app.ui;
 
         this._objectThumbCache = new Map(); // frontendId -> data URL; dropped when the object is removed
+
+        // Shrink-to-fit for the preview grid, seeded from .config (ui.preview_shrink).
+        const uiSettings = (app._settings && app._settings.ui) || {};
+        this.shrinkEnabled = uiSettings.preview_shrink ?? true;
 
         const origAddObject = scene.addObject.bind(scene);
         scene.addObject = (object, id = null) => {
@@ -44,6 +44,13 @@ export class ObjectListPanel {
             scene.toggleObjectSelection(id);
             app._updatePropertiesForSelected();
         });
+
+        // Re-fit the grid when the window resizes (the panel width changes).
+        this._resizeHandler = () => {
+            const c = ui.elements['object-list'];
+            if (c) this._layoutObjectList(c);
+        };
+        window.addEventListener('resize', this._resizeHandler);
     }
 
     _refreshObjectListPanel() {
@@ -92,6 +99,8 @@ export class ObjectListPanel {
 
             container.appendChild(btn);
         });
+
+        this._layoutObjectList(container);
     }
 
     /**
@@ -107,6 +116,66 @@ export class ObjectListPanel {
         container.querySelectorAll('.object-thumb').forEach((el) => {
             el.classList.toggle('selected', scene.selectedObjects.has(el.dataset.id));
         });
+    }
+
+    /**
+     * Fit the thumbnail grid inside the panel's fixed height. When shrink mode is on
+     * (ui.preview_shrink) and the natural auto-fill grid overflows, recompute a
+     * column/row split with the largest square-ish cells that still fit; otherwise
+     * leave the base CSS (auto-fill + scroll) untouched.
+     */
+    _layoutObjectList(container) {
+        const n = container.querySelectorAll('.object-thumb').length;
+        if (n === 0) return;
+
+        // Reset to the natural layout first, then only shrink when needed.
+        this._clearShrinkStyles(container);
+
+        if (!this.shrinkEnabled) return;
+
+        const style = getComputedStyle(container);
+        const padL = parseFloat(style.paddingLeft) || 0;
+        const padR = parseFloat(style.paddingRight) || 0;
+        const gap = parseFloat(style.gap) || 8;
+        const maxH = parseFloat(style.maxHeight); // px, e.g. "216px" -> 216
+
+        const W = container.clientWidth - padL - padR; // content width (clientWidth includes padding)
+        if (!(W > 0) || !(maxH > 0)) return; // collapsed/hidden panel: nothing to fit
+
+        // Natural layout mirrors the base CSS: repeat(auto-fill, minmax(60px, 1fr)).
+        const MIN_CELL = 60;
+        const colsNatural = Math.max(1, Math.floor((W + gap) / (MIN_CELL + gap)));
+        const rowsNatural = Math.ceil(n / colsNatural);
+        const cellNatural = (W - (colsNatural - 1) * gap) / colsNatural; // 1fr stretch -> square via aspect-ratio
+        const naturalH = rowsNatural * cellNatural + (rowsNatural - 1) * gap;
+
+        if (naturalH <= maxH) return; // fits without shrinking
+
+        // Pick the row count whose cells are largest while still fitting in maxH.
+        let best = null;
+        for (let r = 1; r <= n; r++) {
+            const c = Math.ceil(n / r);
+            const cellW = (W - (c - 1) * gap) / c;
+            const cellH = (maxH - (r - 1) * gap) / r;
+            if (cellW <= 0 || cellH <= 0) continue;
+            const score = Math.min(cellW, cellH); // prefer the bigger, squarer cells
+            if (!best || score > best.score) best = { c, r, score };
+        }
+        if (!best) return;
+
+        // Derive the real row count from the chosen columns so the declared tracks
+        // always match the rows the items actually form (no sparse/empty tracks).
+        const rows = Math.ceil(n / best.c);
+
+        container.classList.add('object-list--shrink');
+        container.style.gridTemplateColumns = `repeat(${best.c}, 1fr)`;
+        container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    }
+
+    _clearShrinkStyles(container) {
+        container.classList.remove('object-list--shrink');
+        container.style.gridTemplateColumns = '';
+        container.style.gridTemplateRows = '';
     }
 
     _ensureThumbnailRenderer() {
@@ -139,12 +208,10 @@ export class ObjectListPanel {
     }
 
     /**
-     * Render `object` to a small preview image from a fixed 3/4 angle.
-     * The object is cloned into a dedicated offscreen renderer - separate
-     * from the main viewport, so the live camera and selection state are
-     * never disturbed. Cloning is cheap here: Three.js shares geometry and
-     * material by reference on clone(), so nothing owned by the live scene
-     * is mutated or disposed.
+     * Render `object` to a small preview image from a fixed 3/4 angle, cloned into a
+     * dedicated offscreen renderer so the live camera and selection state are never
+     * disturbed; cloning shares geometry/material by reference, so nothing owned by
+     * the live scene is mutated or disposed.
      */
     _renderThumbnail(object) {
         try {

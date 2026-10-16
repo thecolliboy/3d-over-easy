@@ -58,7 +58,6 @@ grammar-constrained decoding. If the chosen model supports llama.cpp's
 native tool calling, swapping this loop to create_chat_completion(...,
 tools=[...]) will be more robust.
 """
-# ColliBoy
 import argparse
 import os
 import re
@@ -227,7 +226,6 @@ def make_sandbox_namespace(input_path):
     }
 
     if input_path:
-        # ColliBoy
         def load_input():
             """Load the input mesh and return it as a build123d object for editing."""
             from build123d import Mesher
@@ -305,7 +303,7 @@ def run_build123d_code(code, namespace, output_dir):
 
 def _progress(stage, message, iteration=None, max_iterations=None):
     """Emit a machine-readable PROGRESS line for ai.py, flushed immediately so
-    the caller sees it as soon as it is printed. See PROGRESS REPORTING above."""
+    the caller sees it as soon as it is printed. See Progress reporting above."""
     iter_str = str(iteration) if iteration is not None else ''
     max_str = str(max_iterations) if max_iterations is not None else ''
     print(f'PROGRESS: {stage}|{iter_str}|{max_str}|{message}', flush=True)

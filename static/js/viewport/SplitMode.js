@@ -35,11 +35,8 @@ export class SplitMode {
         const ui = app.ui;
         const scene = app.sceneController;
 
-        // Split - enters split mode directly on the selected object, no modal.
-        // Enter confirms and Escape (routed through 'cancel') exits without
-        // splitting. Enter presses that merely commit a text input - e.g. one of
-        // the split-plane move/rotate fields - are ignored rather than treated
-        // as a deliberate "confirm the split" keystroke.
+        // Enter confirms the split; Escape (via 'cancel') exits without cutting.
+        // Enter presses inside text inputs are ignored, not treated as confirm.
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
             if (e.key === 'Enter' && this._splitState) {
@@ -55,9 +52,8 @@ export class SplitMode {
                 return;
             }
 
-            // getSelectedObjectIds() is the authoritative selection source -
-            // falling back to scene.selectedObject here would risk acting on a
-            // stale id that has already left scene.objects.
+            // Authoritative selection source; scene.selectedObject can hold a
+            // stale id no longer present in scene.objects.
             const targetId = selectedIds[0];
             if (!targetId) {
                 app._showAlert('Select an object to split.');
@@ -72,21 +68,15 @@ export class SplitMode {
                 return;
             }
 
-            // Sync any pending client-side transform to the backend before
-            // entering split mode - including the snap-to-floor offset applied
-            // on import, which only ever touches the frontend Three.js object.
-            // Without this, a freshly imported object that has never been moved
-            // keeps a backend copy sitting wherever it was authored rather than
-            // where it is actually shown; the cutting plane's position (derived
-            // from the frontend bounding box) then no longer lines up with what
-            // the backend cuts. Mirrors the same call already used by
+            // Sync any pending client-side transform to the backend first -
+            // including the import-time snap-to-floor offset, which only touches
+            // the frontend object - so the cutting plane (derived from the
+            // frontend bounding box) matches what the backend cuts. Mirrors
             // Union/Subtract/Intersect above.
             await app._commitTransforms([targetId]);
 
-            // _commitTransforms swaps in a replacement object (a new frontendId)
-            // whenever there was a pending transform to sync - so re-resolve the
-            // id against the current selection instead of trusting the now
-            // possibly-stale targetId.
+            // _commitTransforms may swap in a replacement object, so re-resolve
+            // the id from the current selection rather than trusting targetId.
             const currentSelected = scene.getSelectedObjectIds();
             const resolvedId = currentSelected.includes(targetId) ? targetId : currentSelected[0];
             if (!resolvedId) {
@@ -174,9 +164,8 @@ export class SplitMode {
         app.ui.showSplitPanel(true);
         this._refreshSplitPanelInputs();
 
-        // Preview is now a pure read-only computation, so it's safe to fire
-        // one immediately on entry - the user sees where the default (centered)
-        // cut will land before touching the plane at all.
+        // Previews are read-only, so fire one immediately on entry - shows
+        // where the default (centered) cut lands before any dragging.
         this._runSplitPreview();
     }
 
@@ -200,12 +189,10 @@ export class SplitMode {
     }
 
     /**
-     * Applies a value hand-edited in the SPLIT panel's Move/Rotate X/Y/Z
-     * inputs to the cutting plane, mirroring the direct-drag behavior in
-     * _initSplitPlaneDrag: position and rotation are set directly (rather than
-     * via cp.setPosition()/setAxis(), which would snap the plane back to an
-     * axis-aligned preset and discard any free rotation), while the plane's
-     * center stays clamped inside the selected shape's bounding box.
+     * Applies a hand-edited X/Y/Z value from the SPLIT panel to the cutting
+     * plane, mirroring _initSplitPlaneDrag: position/rotation are set directly
+     * (cp.setPosition()/setAxis() would snap back to an axis-aligned preset),
+     * and the center stays clamped inside the shape's bounding box.
      */
     _applySplitPlaneValue(kind, axis, rawValue) {
         if (!this._splitState) return;
@@ -231,10 +218,9 @@ export class SplitMode {
             cp.planeMesh.position.copy(next);
             cp.position.copy(next);
         } else if (kind === 'rotate') {
-            // The same Euler-entanglement problem applies here as in the drag
-            // handler: apply the edit as an incremental world-axis rotation
-            // from the field's current reading to the target value, rather
-            // than writing the Euler component directly.
+            // Same Euler-entanglement issue as the drag handler: rotate
+            // incrementally around a world axis instead of writing the Euler
+            // component directly.
             const currentDeg = THREE.MathUtils.radToDeg(cp.planeMesh.rotation[axis]);
             const deltaRad = THREE.MathUtils.degToRad(value - currentDeg);
             cp.rotateAroundWorldAxis(axis, deltaRad);
@@ -294,12 +280,9 @@ export class SplitMode {
         const cp = app.cuttingPlane;
         const state = this._splitState;
 
-        // Preview calls are read-only, so state.objectId still exists on the
-        // backend - this is the single call that actually performs the cut and
-        // consumes it. Cutting the real object (rather than reusing a preview's
-        // throwaway ids) keeps the session store in sync with the scene: the
-        // original is deleted server-side and only the stored pieces remain, so
-        // undo restores exactly the pre-split state with no stray duplicates.
+        // Previews are read-only, so this is the one call that actually cuts
+        // and consumes state.objectId - cutting the real object (not a preview's
+        // throwaway ids) keeps the session store in sync for undo.
         if (this._splitPreviewTimer) {
             clearTimeout(this._splitPreviewTimer);
             this._splitPreviewTimer = null;
@@ -322,10 +305,8 @@ export class SplitMode {
                 throw new Error('Could not compute a cut at the current plane position.');
             }
 
-            // Tear down split mode only once we know the cut actually succeeded -
-            // on failure we fall through to the catch block below and leave the
-            // plane and panel exactly as they were, so the user can adjust the
-            // plane and try again, or press Cancel.
+            // Tear down split mode only after a successful cut; on failure the
+            // catch block leaves the plane and panel intact for another attempt.
             app.ui.showSplitPanel(false);
             scene.removeObject(state.originalObject);
             app.backendIds.delete(state.originalObject);
@@ -339,14 +320,9 @@ export class SplitMode {
                 }
             }
 
-            // Each split piece was just loaded as a brand-new mesh via
-            // _loadMeshFromServer, which always starts out with plain "normal"
-            // material settings - the same root cause as the transform-commit
-            // case elsewhere in this file. Without this reapply step, splitting
-            // an object while in wireframe/transparent/wireframe-hybrid mode
-            // made the resulting pieces silently pop back to the default look
-            // until the view mode was toggled off and back on. Reapplying the
-            // active view mode makes the new meshes pick it up immediately.
+            // New piece meshes load with plain "normal" material settings, so
+            // reapply the active view mode - otherwise pieces in wireframe or
+            // transparent modes would pop back to default until toggled again.
             if (scene.viewMode !== 'normal') {
                 scene.setViewMode(scene.viewMode);
             }
@@ -359,9 +335,7 @@ export class SplitMode {
         } catch (err) {
             console.error('Split failed:', err);
             app._showAlert(`Split failed: ${err.message}`);
-            // Stay in split mode - the plane and panel remain visible and
-            // usable, so the user can move the plane and try again, or press
-            // Cancel to exit split mode cleanly.
+            // Stay in split mode on failure; the plane and panel remain usable.
         } finally {
             ui.hideLoading();
         }
@@ -374,9 +348,7 @@ export class SplitMode {
      * rotation - not just axis-aligned cuts.
      */
     _debouncedSplitPreview() {
-        // The plane just moved, so whatever preview we had (if any) no longer
-        // matches the current cut - invalidate it so _confirmSplit() can't
-        // reuse it until a fresh one lands.
+        // Invalidate the cached result; it no longer matches the current cut.
         this._lastSplitPreviewResult = null;
 
         if (this._splitPreviewTimer) clearTimeout(this._splitPreviewTimer);
@@ -396,11 +368,9 @@ export class SplitMode {
             const normal = cp.getNormal();
             const offset = cp.planeMesh.position.dot(normal);
 
-            // The /geometry/cut endpoint is read-only in preview mode - it
-            // computes the pieces without touching the session store or history,
-            // so it's safe to fire on state.objectId itself while the plane is
-            // being dragged. _confirmSplit() issues the one real cut that
-            // actually consumes the object.
+            // /geometry/cut in preview mode is read-only - no session store or
+            // history changes, so it's safe on state.objectId during dragging;
+            // only _confirmSplit() performs the consuming cut.
             const result = await app.api.post('/geometry/cut', {
                 session_id: state.sessionId,
                 object_id: state.objectId,
@@ -409,15 +379,13 @@ export class SplitMode {
                 preview: true,
             });
 
-            // Drop any response that arrives after split mode has already been
-            // cancelled or confirmed, or after a new split session has started.
+            // Ignore responses arriving after cancel/confirm or a new session.
             if (this._splitState !== state) return;
 
             if (result && result.pieces) {
-                // Pieces come from cutting the real object in place, so their
-                // positions are correct by construction - no bounds sanity check
-                // needed. Cache the result for the live preview render; confirm
-                // performs its own authoritative cut and ignores these ids.
+                // Piece positions are correct by construction (cut in place), so
+                // cache them for the preview render; _confirmSplit() does its own
+                // authoritative cut and ignores these ids.
                 this._lastSplitPreviewResult = result;
                 cp.showPreview(result.pieces[0], result.pieces[1]);
             } else {
@@ -434,13 +402,10 @@ export class SplitMode {
     }
 
     /**
-     * Split-mode plane dragging: it reuses the screen-projected, axis-locked drag
-     * behavior of _initAxisDrag above (a small deadzone, then a single locked axis
-     * picked from the drag direction), but is scoped to the cutting plane mesh
-     * instead of a selected object and only active while split mode is open. For
-     * Move, the locked "axis" is the plane's own normal rather than a world axis;
-     * for Rotate it's the world axis perpendicular to the drag. The plane's center
-     * is clamped to stay inside the selected shape's bounding box while moving.
+     * Cutting-plane dragging, scoped to split mode and reusing _initAxisDrag's
+     * screen-projected, axis-locked behavior (deadzone, then one locked axis).
+     * Move locks the plane's own normal; Rotate locks the world axis perpendicular
+     * to the drag. The center stays clamped inside the shape's bounding box.
      */
     _initSplitPlaneDrag() {
         const app = this.app;
@@ -527,11 +492,9 @@ export class SplitMode {
                 const rect = canvas.getBoundingClientRect();
 
                 if (drag.mode === 'move') {
-                    // The plane only ever has one meaningful axis of motion: its own
-                    // normal. Sliding it "sideways" within its own face doesn't change
-                    // what gets cut, so - unlike shapes - we never search world x/y/z
-                    // here; we always track the plane's current normal direction (which
-                    // itself moves as the plane is rotated).
+                    // The plane's only meaningful motion axis is its own normal -
+                    // sliding within its face doesn't change the cut, so no world
+                    // x/y/z search like for shapes.
                     const normal = cp.getNormal().clone();
                     drag.moveAxis = normal;
                     drag.axisScreenVec = (() => {
@@ -540,9 +503,7 @@ export class SplitMode {
                         return { x: normalScreen.x - originScreen.x, y: normalScreen.y - originScreen.y };
                     })();
                 } else {
-                    // Rotation is driven by the axis PERPENDICULAR to the drag (like
-                    // spinning a turntable): dragging left/right spins around whichever
-                    // world axis reads as "up/down" on screen, and vice versa.
+                    // Rotate around the world axis perpendicular to the drag.
                     const screenAxis = Math.abs(dxTotal) >= Math.abs(dyTotal) ? 'x' : 'y';
                     const scoreAxis = screenAxis === 'x' ? 'y' : 'x';
 
@@ -598,11 +559,9 @@ export class SplitMode {
                 const pixelsAlongTangent = dot / Math.sqrt(lenSq);
                 const angle = pixelsAlongTangent * ROTATE_RAD_PER_PIXEL;
 
-                // `angle` is the TOTAL rotation since the drag started (not a per-frame
-                // delta), so it's re-derived fresh on each move from the quaternion
-                // captured at drag start - never accumulated onto the live quaternion,
-                // and never written as Euler components directly (see rotateAroundWorldAxis
-                // for why).
+                // `angle` is total rotation since drag start, re-derived each move
+                // from the start quaternion - never accumulated or written as Euler
+                // components.
                 cp.rotateAroundWorldAxis(drag.worldAxis, angle, drag.startQuaternion);
             }
 
@@ -626,11 +585,9 @@ export class SplitMode {
     }
 
     /**
-     * Clicking any button in the top toolbar/menu (Import, Export, Copy, Union,
-     * Split itself, etc. - including the hamburger dropdown, which is nested inside
-     * the toolbar) cancels split mode instead of performing that button's own action.
-     * Using the capture phase means the click never reaches the button's own
-     * bubble-phase listener.
+     * Toolbar clicks (including the hamburger dropdown, nested in the toolbar)
+     * cancel split mode instead of running their own action; the capture phase
+     * keeps the click from reaching the button's bubble-phase listener.
      */
     _initSplitToolbarGuard() {
         const toolbar = document.getElementById('toolbar');

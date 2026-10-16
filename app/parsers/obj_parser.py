@@ -193,7 +193,7 @@ def obj_to_mesh_arrays(obj_mesh: ObjMesh) -> Tuple[List[float], List[int], Optio
 
             if has_normal:
                 if flat_normals is None:
-                    # first normal seen; pad earlier zero-normal slots so both arrays stay aligned (ColliBoy)
+                    # first normal seen; pad earlier zero-normal slots so both arrays stay aligned
                     flat_normals = [0.0] * (new_idx * 3)
                 flat_normals.extend(normals[vn_idx])
             elif flat_normals is not None:

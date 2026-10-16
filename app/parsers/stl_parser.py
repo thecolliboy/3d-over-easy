@@ -26,7 +26,7 @@ class StlParseError(Exception):
 
 def detect_stl_format(data: bytes) -> str:
     """Classify raw bytes as binary or ASCII STL by inspecting the header prefix."""
-    # a strict ascii decode failing means the head is packed with binary data
+    # strict ascii failure implies a binary-packed header
     try:
         text_candidate = data[:512].decode('ascii', errors='strict')
     except UnicodeDecodeError:
@@ -41,7 +41,7 @@ def detect_stl_format(data: bytes) -> str:
         if keyword_count >= 3:
             return 'ascii'
 
-    # control characters inside the header betray a binary payload
+    # control characters in the header indicate a binary payload
     has_non_printable = any(b < 9 or (b > 13 and b < 32) for b in data[:_STL_HEADER_SIZE])
     if has_non_printable:
         return 'binary'
@@ -112,7 +112,7 @@ def parse_binary_stl(data: bytes) -> Tuple[np.ndarray, np.ndarray]:
 
     offset = _STL_HEADER_SIZE
 
-    # triangle count sits in the uint32 slot right after the 80-byte header
+    # triangle count is stored as uint32 right after the 80-byte header
     num_triangles = struct.unpack_from('<I', data, offset)[0]
     offset += 4
 
@@ -143,7 +143,7 @@ def parse_binary_stl(data: bytes) -> Tuple[np.ndarray, np.ndarray]:
         vertices[base_idx + 1] = [v2x, v2y, v2z]
         vertices[base_idx + 2] = [v3x, v3y, v3z]
 
-        # the face normal is stamped onto all three corners of the record
+        # assign the face normal to all three corners of the record
         normals[base_idx] = triangle_normal
         normals[base_idx + 1] = triangle_normal
         normals[base_idx + 2] = triangle_normal
@@ -177,7 +177,7 @@ def compute_normals_from_vertices(vertices: np.ndarray,
     # the cross product of two edges is the face normal
     face_normals = np.cross(edge1, edge2)
 
-    # each face normal lands on its three corners via stride-3 slices
+    # each face normal is assigned to its three corners via stride-3 slices
     for i in range(3):
         normals[i::3] = face_normals
 

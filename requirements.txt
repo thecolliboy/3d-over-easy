@@ -1,4 +1,4 @@
-# Pinned dependency set for web-3d-builder - everything needed to run, test, and extend the app.
+# Pinned dependencies for web-3d-builder
 # ColliBoy
 
 # Web framework and cross-origin access for the browser client

@@ -2,7 +2,7 @@
 
 Resolves the format from the filename extension or, when that is missing or
 ambiguous, by sniffing the payload itself, then dispatches to the matching
-per-format parser. Supported: STL, OBJ, PLY, GLB/GLTF, 3MF, FBX.
+per-format parser. Supported: STL, OBJ, PLY, GLB/GLTF, 3MF.
 """
 # ColliBoy
 
@@ -10,8 +10,7 @@ from app.parsers.stl_parser import parse_stl as _parse_stl_raw
 from app.parsers.obj_parser import parse_obj as _parse_obj_raw, obj_to_mesh_arrays
 from app.parsers.ply_parser import parse_ply as _parse_ply_raw, ply_to_mesh_arrays
 from app.parsers.glb_gltf_parser import parse_glb, parse_gltf, gltf_to_mesh_arrays
-from app.parsers._3mf_parser import parse_3mf
-from app.parsers.fbx_parser import parse_fbx, fbx_to_mesh_arrays
+from app.parsers._3mf_parser import parse_3mf, apply_item_transform
 
 
 FORMAT_MAP = {
@@ -21,7 +20,6 @@ FORMAT_MAP = {
     '3mf': '3mf',
     'glb': 'glb',
     'gltf': 'gltf',
-    'fbx': 'fbx',
 }
 
 
@@ -30,7 +28,7 @@ def detect_format(filename, file_data):
 
     The extension is tried first; unknown extensions fall back to sniffing
     the leading bytes. Returns 'stl', 'obj', 'ply', 'glb', 'gltf', '3mf',
-    'fbx', or None when nothing matches.
+    or None when nothing matches.
     """
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     if ext in FORMAT_MAP:
@@ -69,24 +67,6 @@ def detect_format(filename, file_data):
         except Exception:
             pass
 
-    # ascii fbx exposes version/index keywords in plain text
-    try:
-        text_check = file_data[:512].decode('ascii', errors='strict')
-        if 'FBXHeaderVersion' in text_check or 'PolygonVertexIndex' in text_check:
-            return 'fbx'
-    except (UnicodeDecodeError, ValueError):
-        pass
-
-    # binary fbx is told apart by version-range ints in its header
-    if len(file_data) >= 24:
-        import struct
-        try:
-            vals = struct.unpack_from('<III', file_data, 0)
-            if any(6000 <= v <= 8000 for v in vals):
-                return 'fbx'
-        except struct.error:
-            pass
-
     return ext if ext else None
 
 
@@ -112,8 +92,6 @@ def parse_mesh(filename, file_data):
             return _parse_glb_gltf(fmt, file_data)
         elif fmt == '3mf':
             return _parse_3mf(file_data)
-        elif fmt == 'fbx':
-            return _parse_fbx(file_data)
     except ValueError:
         raise
     except Exception as e:
@@ -290,40 +268,47 @@ def _parse_3mf(data):
     }
 
 
+def parse_3mf_meshes(data):
+    """Parse a 3MF archive into one mesh dict per archive object.
+
+    Unlike the merged pool in _parse_3mf, each object keeps its own vertex pool
+    with its build-item transform baked in, so multi-model archives round-trip
+    as separate models at their saved positions."""
+    try:
+        scene = parse_3mf(data)
+    except Exception as e:
+        raise ValueError(f'Failed to parse 3MF: {e}')
+
+    if not scene.meshes:
+        raise ValueError('No meshes found in 3MF file')
+
+    meshes = []
+    for mesh_3mf in scene.meshes:
+        try:
+            vert, idx, col = _convert_3mf_mesh(mesh_3mf)
+        except Exception as e:
+            raise ValueError(f'Failed to convert 3MF mesh: {e}')
+
+        meshes.append({
+            'vertices': vert,
+            'indices': idx,
+            'normals': None,
+            'colors': col,
+            'num_vertices': len(vert) // 3,
+            'num_faces': len(idx) // 3 if idx else 0,
+        })
+
+    return meshes
+
+
 def _convert_3mf_mesh(mesh_3mf):
     """Flatten one 3MF mesh record into (vertices, indices, colors) arrays."""
     if len(mesh_3mf.vertices) < 3:
         raise ValueError("3MF mesh has no valid vertices")
 
-    return (mesh_3mf.vertices, mesh_3mf.indices, mesh_3mf.colors)
+    # bake item transforms into vertices so each object keeps its archive position
+    vertices = mesh_3mf.vertices
+    if mesh_3mf.transform:
+        vertices = apply_item_transform(vertices, mesh_3mf.transform)
 
-
-def _parse_fbx(data):
-    """Parse an FBX file and convert its first mesh to flat arrays."""
-    try:
-        scene = parse_fbx(data)
-    except Exception as e:
-        raise ValueError(f'Failed to parse FBX: {e}')
-
-    if not scene.meshes:
-        raise ValueError('No meshes found in FBX file')
-
-    # only the first mesh is imported; an fbx scene may hold several
-    fbx_mesh = scene.meshes[0]
-
-    try:
-        vert, idx, _ = fbx_to_mesh_arrays(fbx_mesh)
-    except Exception as e:
-        raise ValueError(f'Failed to convert FBX mesh: {e}')
-
-    num_verts = len(vert) // 3
-    num_faces = len(idx) // 3 if idx else 0
-
-    return {
-        'vertices': vert,
-        'indices': idx,
-        'normals': None,
-        'colors': None,
-        'num_vertices': num_verts,
-        'num_faces': num_faces,
-    }
+    return (vertices, mesh_3mf.indices, mesh_3mf.colors)

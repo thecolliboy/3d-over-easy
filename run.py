@@ -43,6 +43,24 @@ if __name__ == '__main__':
         open_browser = bool(open_browser)
     url = _browser_url(host, port) if open_browser else None
 
+    local_libraries = _resolve(webserver, 'local_libraries', None, False)
+    if isinstance(local_libraries, str):
+        local_libraries = local_libraries.strip().lower() not in ('false', '0', 'no', 'off')
+    else:
+        local_libraries = bool(local_libraries)
+    if local_libraries:
+        # Mirror the three.js build + addons into js_libraries/ for offline use;
+        # existing files are skipped, failures fall back to the CDN.
+        from app.libraries import ensure_downloaded
+        print('Preparing local JS libraries for offline use...')
+        if not ensure_downloaded():
+            print('Warning: some library files are missing; the editor will fall back to CDN URLs.')
+    else:
+        # The mirror is only useful while enabled; clear leftovers from an earlier run.
+        from app.libraries import remove_local
+        if remove_local():
+            print('Removed local JS libraries (local_libraries disabled).')
+
     if sys.platform == 'win32':
         # gunicorn relies on fork(), which Windows lacks; serve with waitress instead.
         from waitress import serve
@@ -52,8 +70,8 @@ if __name__ == '__main__':
         serve(app, host=host, port=port, threads=max(1, workers))
     else:
         if getattr(sys, 'frozen', False):
-            # gunicorn loads the WSGI app by importing module 'run'; in a frozen
-            # bundle there is no run.py on disk, so alias this script as 'run'.
+            # gunicorn imports the WSGI app as module 'run'; a frozen bundle has
+            # no run.py on disk, so alias this script.
             sys.modules['run'] = sys.modules[__name__]
 
         from gunicorn.app.wsgiapp import WSGIApplication

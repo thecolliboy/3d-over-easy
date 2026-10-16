@@ -128,7 +128,7 @@ def parse_gltf(data: bytes) -> GlTFScene:
     if not isinstance(json_data, dict):
         raise GlTfParseError("GLTF root must be a JSON object")
 
-    # external buffer references need a base path, so only self-contained files are decoded here
+    # only self-contained files; external buffers need a base path
     return _parse_gltf_json(json_data, None)
 
 
@@ -239,7 +239,7 @@ def _read_accessor(accessors: List[Dict], buffer_views: Dict[int, bytes],
         end = start + count * num_components * (_COMPONENT_TYPES.get(component_type, ('f', 4))[1])
         raw_data = buf_data[start:end]
     else:
-        # no backing buffer view; fill with zeros so downstream shapes stay uniform
+        # no buffer view; zero-fill keeps downstream shapes uniform
         return [0.0] * (count * num_components)
 
     struct_code = _COMPONENT_TYPES.get(component_type, ('f', 4))[0]

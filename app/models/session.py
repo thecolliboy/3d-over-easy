@@ -85,11 +85,10 @@ class SessionStore:
     # ── Undo / redo snapshots ──────────────────────────────────────────────
 
     def push_undo_snapshot(self, session_id: str, object_ids: List[str], operation_name: str = 'operation') -> Optional[Dict[str, Any]]:
-        """Capture a deep copy of the entire session so undo can restore exact pre-op state.
+        """Deep-copy the whole session so undo restores exact pre-op state.
 
-        Snapshots cover every object in the session (not just the named ones) because
-        operations replace objects with brand-new ids - restoring only the affected
-        objects would leave orphaned results behind and drop everything else.
+        Covers every object, not just the named ones: operations mint new ids, so a
+        partial restore would orphan results and drop unrelated objects.
         """
         session = self.get_or_create_session(session_id)
         if not session:
@@ -112,18 +111,17 @@ class SessionStore:
         return snapshot
 
     def commit_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Record the post-operation state on the newest snapshot so redo can re-apply it.
+        """Record post-operation state on the newest snapshot so redo can re-apply it.
 
-        Called by routes after an operation has finished mutating the session.
-        Without this, redo would only have the pre-op state to restore and would
-        silently do nothing (the op's result objects were minted with new ids).
+        Called by routes after an operation mutates the session; without it, redo has
+        only the pre-op state and silently does nothing (ops mint new ids).
         """
         session = self.get_session(session_id)
         if not session or len(session['undo_stack']) == 0:
             return None
 
-        # Always record the latest state - multi-step operations (e.g. cut, which
-        # stores one piece per call) commit repeatedly and only the final state matters.
+        # Always record the latest state - multi-step ops (e.g. cut, one piece per
+        # call) commit repeatedly and only the final state matters.
         last = session['undo_stack'][-1]
         last['post_objects'] = copy.deepcopy(session['objects'])
         return last
@@ -148,8 +146,8 @@ class SessionStore:
             return None
 
         snapshot = session['redo_stack'].pop()
-        # Redo must restore what the operation produced, not the pre-op state it was
-        # taken from - fall back to the pre-op copy when no post-state was recorded.
+        # Restore the op's result, not its pre-op state; fall back to the pre-op
+        # copy when no post-state was recorded.
         if snapshot.get('post_objects') is None:
             restore_from = snapshot['objects']
         else:

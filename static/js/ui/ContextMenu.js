@@ -5,8 +5,8 @@
 export class ContextMenu {
     constructor() {
         this.element = null;
-        this.onSelect = null; // Invoked with the chosen entry once its own action has run
-        // Any click - or a right-click landing outside the panel - dismisses it
+        this.onSelect = null; // Invoked with the chosen entry when it is selected
+        // Clicks or right-clicks outside the panel dismiss it
         document.addEventListener('click', () => this.hide());
         document.addEventListener('contextmenu', (e) => {
             if (!this.element || !this.element.contains(e.target)) {
@@ -71,7 +71,7 @@ export class ContextMenu {
     }
 
     hide() {
-        // Detach from the DOM so the panel is fully torn down (ColliBoy)
+        // Detach the panel from the DOM (ColliBoy)
         if (this.element && this.element.parentNode) {
             this.element.parentNode.removeChild(this.element);
             this.element = null;

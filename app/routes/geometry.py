@@ -1,4 +1,4 @@
-"""Single-object mesh operations: repair, hollow, cut, transform, and analysis.
+"""Single-object mesh operations: solid, hollow, cut, transform, and analysis.
 
 Each endpoint loads one session object, runs the corresponding manifold engine
 operation (or a pure computation), and stores the result back into the session.
@@ -11,7 +11,7 @@ import uuid
 import numpy as np
 from flask import Blueprint, request, jsonify
 from app.engine.manifold_wrapper import (
-    repair as _repair,
+    solidify as _solidify,
     hollow as _hollow,
     cut_by_plane as _cut_by_plane,
     scale_mesh as _scale_mesh,
@@ -56,8 +56,8 @@ def _load_obj(session_id, obj_id):
         indices = np.array(obj['indices'], dtype=np.uint32).reshape(-1, 3)
     else:
         # Unindexed meshes store flat corner runs - each group of three is one triangle.
-        # Weld the duplicated corners (STL repeats shared vertices per face) so the
-        # temporary indices addressing the flat list map into a deduped vertex pool.
+        # Weld duplicated corners (STL repeats shared vertices per face) so the temp
+        # indices over the flat list address a deduped vertex pool.
         num_faces = len(vertices) // 3
         if num_faces > 0:
             temp_indices = np.arange(num_faces * 3, dtype=np.uint32).reshape(-1, 3)
@@ -123,16 +123,16 @@ def _save_result(session_id, result_verts, result_tris, name='result', format_ty
         'num_faces': payload['num_faces'],
     })
 
-    # Record the post-op state so redo can re-apply this operation (the old object
-    # was removed above and replaced with a new id - only a full-state commit knows).
+    # Commit post-op state so redo can replay this op; the old object is gone,
+    # replaced by a new id, so only a full-state snapshot captures it.
     store.commit_snapshot(session_id)
 
     return payload
 
 
-@bp.route('/repair', methods=['POST'])
+@bp.route('/solid', methods=['POST'])
 @timeout_operation(30)
-def geometry_repair():
+def geometry_solid():
     data = request.json or {}
     session_id = data.get('session_id')
     obj_id = data.get('object_id')
@@ -140,20 +140,20 @@ def geometry_repair():
     if not session_id or not obj_id:
         return jsonify({'error': 'session_id and object_id required'}), 400
 
-    _push_undo(session_id, [obj_id], 'repair')
+    _push_undo(session_id, [obj_id], 'solid')
 
     try:
         vertices, indices = _load_obj(session_id, obj_id)
-        result_verts, result_tris = _repair(vertices, indices)
+        result_verts, result_tris = _solidify(vertices, indices)
     except MeshProcessingTimeout as e:
         return jsonify({'error': str(e), 'timeout': True}), 504
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'error': f'Repair failed: {str(e)}'}), 400
+        return jsonify({'error': f'Solid failed: {str(e)}'}), 400
 
     store.remove_object(session_id, obj_id)
-    return jsonify(_save_result(session_id, result_verts, result_tris, 'repaired', 'mesh'))
+    return jsonify(_save_result(session_id, result_verts, result_tris, 'solidified', 'mesh'))
 
 
 @bp.route('/hollow', methods=['POST'])
@@ -207,9 +207,8 @@ def geometry_cut():
         return jsonify({'error': f'Cut failed: {str(e)}'}), 400
 
     if preview:
-        # Read-only cut for split mode's live preview - it must not mutate the
-        # session or push history, otherwise every plane drag would leave
-        # throwaway pieces behind that undo resurrects.
+        # Read-only cut for split mode's live preview - no mutation, no history;
+        # otherwise each plane drag leaves throwaway pieces that undo resurrects.
         return jsonify({'pieces': [
             _piece_payload(pv, pt, f'cut_piece_{i+1}') for i, (pv, pt) in enumerate(pieces)
         ]})

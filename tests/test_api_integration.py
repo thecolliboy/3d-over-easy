@@ -1,9 +1,9 @@
 """Integration tests for all API endpoints.
 
 Tests cover import/export, CSG operations (union/subtract/intersect),
-geometry operations (repair/hollow/cut/scale/rotate/translate/simplify/smooth/info),
+geometry operations (solid/hollow/cut/scale/rotate/translate/simplify/smooth/info),
 primitive creation, session management, and end-to-end workflows -
-using Flask test client with binary STL data as test fixtures.
+using the Flask test client with binary STL fixtures.
 """
 # ColliBoy
 
@@ -18,7 +18,7 @@ from app import create_app
 from app.models.session import store
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# --- Helpers
 
 def _make_unit_cube_stl() -> bytes:
     """Generate a binary STL of a unit cube (12 triangles = 36 vertices)."""
@@ -85,7 +85,7 @@ def _make_large_cube_stl(size: float = 4.0) -> bytes:
     return buf.getvalue()
 
 
-# ── Fixtures ──────────────────────────────────────────────────────────────
+# --- Fixtures
 
 @pytest.fixture(autouse=True)
 def clean_sessions():
@@ -95,7 +95,7 @@ def clean_sessions():
 
 @pytest.fixture
 def app_client():
-    """Provide a Flask test client with cleaned sessions."""
+    """Provide a Flask test client for endpoint tests."""
     app = create_app('default')
     with app.test_client() as client:
         yield client
@@ -107,7 +107,7 @@ def unit_cube_file():
     return _make_unit_cube_stl()
 
 
-# ── Helper methods for test classes ───────────────────────────────────────
+# --- Helper methods for test classes
 
 def _import_cube(client, cube_data, session_id=None):
     """Import a unit cube and return (session_id, object_id)."""
@@ -120,10 +120,9 @@ def _import_cube(client, cube_data, session_id=None):
 
 
 def _create_manifold_cube(client, offset=(0.0, 0.0, 0.0), session_id=None):
-    """Create a valid manifold-ready cube mesh directly in the session store.
+    """Insert a manifold-ready cube directly into the session store.
 
-    This bypasses STL parsing to ensure the mesh has proper indexed triangles
-    with correct winding order for CSG operations.
+    Bypasses STL parsing so the mesh has indexed triangles with correct winding for CSG.
     """
     v = np.array([
         [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],   # bottom face
@@ -136,7 +135,7 @@ def _create_manifold_cube(client, offset=(0.0, 0.0, 0.0), session_id=None):
         [4, 0, 3], [4, 3, 7],   # back
         [1, 5, 6], [1, 6, 2],   # front
         [4, 5, 1], [4, 1, 0],   # left
-        [3, 2, 6], [3, 6, 7],   # right (ColliBoy)
+        [3, 2, 6], [3, 6, 7],   # right
     ], dtype=np.uint32)
 
     actual_session = store.get_or_create_session(session_id)['id'] if session_id else None
@@ -156,7 +155,7 @@ def _create_manifold_cube(client, offset=(0.0, 0.0, 0.0), session_id=None):
     return actual_session or session_id, obj_id
 
 
-# ── Health Check Tests ───────────────────────────────────────────────────
+# --- Health Check Tests
 
 class TestHealth:
     def test_health_endpoint(self, app_client):
@@ -167,7 +166,7 @@ class TestHealth:
         assert data['status'] == 'ok'
 
 
-# ── Import Tests ─────────────────────────────────────────────────────────
+# --- Import Tests
 
 class TestImport:
     def test_import_stl_file(self, app_client, unit_cube_file):
@@ -201,7 +200,7 @@ class TestImport:
         assert 'num_faces' in obj
 
     def test_import_no_file_returns_400(self, app_client):
-        """Import without a file returns 400 error."""
+        """Import without a file returns 400."""
         resp = app_client.post('/api/import', data={})
         assert resp.status_code == 400
         data = resp.get_json()
@@ -220,7 +219,7 @@ class TestImport:
         resp = app_client.post('/api/import', data=data, content_type='multipart/form-data')
         assert resp.status_code == 200
         result = resp.get_json()
-        # A new session should have been created
+        # A new session was created for this import.
         assert len(store._sessions) >= initial_count
 
     def test_import_multiple_files(self, app_client, unit_cube_file):
@@ -281,8 +280,8 @@ end_header
         assert resp.status_code == 200
 
     def test_import_glb_file(self, app_client):
-        """Importing a valid GLB file succeeds."""
-        # Minimal GLB: magic + version + length header only (will fail on parsing but tests detection)
+        """A GLB with no mesh data is detected but rejected (400)."""
+        # Header-only GLB: format detection passes, parsing fails.
         glb_header = struct.pack('<I', 0x46546C67)  # GLTF magic
         glb_header += struct.pack('<I', 2)           # version
         glb_header += struct.pack('<I', 12)          # total length
@@ -291,7 +290,7 @@ end_header
         assert resp.status_code == 400
 
     def test_import_3mf_file(self, app_client):
-        """Importing a valid 3MF file is accepted (may return 400 for empty mesh)."""
+        """A minimal 3MF archive returns 200 or 400 (empty mesh)."""
         # Minimal 3MF is a ZIP with [Content_Types].xml and model.xml
         import zipfile
         buf = io.BytesIO()
@@ -300,11 +299,35 @@ end_header
             zf.writestr('model/model.xml', '<?xml version="1.0"?><model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"></model>')
         data = {'file': (io.BytesIO(buf.getvalue()), 'test.3mf')}
         resp = app_client.post('/api/import', data=data, content_type='multipart/form-data')
-        # 3MF with no mesh data returns 400, valid 3MF returns 200
+        # Both statuses are valid for this minimal payload.
         assert resp.status_code in (200, 400)
 
+    def test_import_multi_object_3mf_keeps_objects_separate(self, app_client):
+        """A multi-object 3MF imports as separate objects at their archive positions."""
+        from app.parsers._3mf_parser import write_3mf
 
-# ── Export Tests ─────────────────────────────────────────────────────────
+        first = _unit_cube_mesh()
+        second = _unit_cube_mesh()
+        # column-major world matrix (three.js Matrix4.elements order)
+        second['transform'] = [0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 5, 2, 3, 1]
+
+        archive = write_3mf([first, second])
+        data = {'file': (io.BytesIO(archive), 'project.3mf')}
+        resp = app_client.post('/api/import', data=data, content_type='multipart/form-data')
+        assert resp.status_code == 200
+        result = resp.get_json()
+
+        # One session object per archive mesh - not a merged pool
+        assert len(result['objects']) == 2
+        assert result['imported_count'] == 2
+
+        second_verts = result['objects'][1]['vertices']
+        triples = [tuple(second_verts[i:i + 3]) for i in range(0, len(second_verts), 3)]
+        # The transformed cube's corner lands at its archive position (local origin -> (5,2,3)).
+        assert any(abs(x - 5) < 1e-9 and abs(y - 2) < 1e-9 and abs(z - 3) < 1e-9 for x, y, z in triples)
+
+
+# --- Export Tests
 
 class TestExport:
     def test_export_stl_single_object(self, app_client, unit_cube_file):
@@ -328,6 +351,13 @@ class TestExport:
         assert resp.status_code == 200
         assert 'application/ply' in resp.content_type
 
+    def test_export_3mf_single_object(self, app_client, unit_cube_file):
+        """Export a single object as 3MF returns a valid archive."""
+        session_id, obj_id = _import_cube(app_client, unit_cube_file)
+        resp = app_client.get(f'/api/export?session_id={session_id}&object_id={obj_id}&format=3mf')
+        assert resp.status_code == 200
+        assert '3dmanufacturing' in resp.content_type
+
     def test_export_requires_session_id(self, app_client):
         """Export without session_id returns 400."""
         resp = app_client.get('/api/export?object_id=abc&format=stl')
@@ -335,7 +365,7 @@ class TestExport:
 
     def test_export_unknown_format_returns_400(self, app_client):
         """Export with unsupported format returns 400."""
-        resp = app_client.get('/api/export?session_id=abc&object_id=xyz&format=fbx')
+        resp = app_client.get('/api/export?session_id=abc&object_id=xyz&format=xyz')
         assert resp.status_code in (400, 404)
 
     def test_export_object_not_found_returns_404(self, app_client):
@@ -363,7 +393,7 @@ class TestExport:
         resp = app_client.get(f'/api/export/all?session_id={session_id}&format=stl')
         assert resp.status_code == 200
         num_tris = struct.unpack('<I', resp.data[80:84])[0]
-        # 12 soup triangles + 12 indexed triangles; the old merge dropped the soup
+        # 12 soup + 12 indexed triangles must all be present.
         assert num_tris == 24
 
     def test_export_all_combined_obj(self, app_client, unit_cube_file):
@@ -386,6 +416,20 @@ class TestExport:
         # 36 soup vertices + 8 indexed vertices
         assert b'element vertex 44' in resp.data
 
+    def test_export_all_combined_3mf(self, app_client, unit_cube_file):
+        """Combined 3MF packs every session object into one archive."""
+        session_id, _ = _import_cube(app_client, unit_cube_file)
+        _create_manifold_cube(app_client, offset=(5.0, 0.0, 0.0), session_id=session_id)
+        resp = app_client.get(f'/api/export/all?session_id={session_id}&format=3mf')
+        assert resp.status_code == 200
+        # The response is a ZIP; its model document must hold both meshes.
+        import zipfile
+        zf = zipfile.ZipFile(io.BytesIO(resp.data))
+        names = zf.namelist()
+        model_name = next(n for n in names if n.endswith('.model'))
+        model_xml = zf.read(model_name).decode('utf-8')
+        assert model_xml.count('<object id=') == 2
+
     def test_export_preset_print_ready_whole_session_merges_all(self, app_client, unit_cube_file):
         """Print-ready without object_id merges every session object into one STL."""
         session_id, _ = _import_cube(app_client, unit_cube_file)
@@ -393,7 +437,7 @@ class TestExport:
         resp = app_client.get(f'/api/export/preset?session_id={session_id}&preset=print-ready')
         assert resp.status_code == 200
         num_tris = struct.unpack('<I', resp.data[80:84])[0]
-        # Both objects must be present; the old code wrote only the first mesh (12)
+        # Both objects must survive in the merged output.
         assert num_tris >= 24
 
     def test_export_preset_print_ready(self, app_client, unit_cube_file):
@@ -403,7 +447,7 @@ class TestExport:
         assert resp.status_code == 200
 
     def test_export_preset_3mf(self, app_client, unit_cube_file):
-        """3MF preset exports valid 3MF archive."""
+        """3MF preset exports a valid 3MF archive."""
         session_id, obj_id = _import_cube(app_client, unit_cube_file)
         resp = app_client.get(f'/api/export/preset?session_id={session_id}&object_id={obj_id}&preset=3mf')
         assert resp.status_code == 200
@@ -433,7 +477,154 @@ class TestExport:
         assert resp.status_code in (400, 404)
 
 
-# ── CSG Operation Tests ──────────────────────────────────────────────────
+def _unit_cube_mesh(offset=(0.0, 0.0, 0.0)):
+    """Indexed unit-cube mesh in the shape expected by /api/export/scene."""
+    ox, oy, oz = offset
+    vertices = [
+        ox, oy, oz,             # 0
+        ox + 1, oy, oz,         # 1
+        ox + 1, oy + 1, oz,     # 2
+        ox, oy + 1, oz,         # 3
+        ox, oy, oz + 1,         # 4
+        ox + 1, oy, oz + 1,     # 5
+        ox + 1, oy + 1, oz + 1, # 6
+        ox, oy + 1, oz + 1,     # 7
+    ]
+    indices = [
+        0, 1, 2, 0, 2, 3,       # z=0 face
+        4, 5, 6, 4, 6, 7,       # z=1 face
+        0, 1, 5, 0, 5, 4,       # y=0 face
+        2, 3, 7, 2, 7, 6,       # y=1 face
+        0, 3, 7, 0, 7, 4,       # x=0 face
+        1, 2, 6, 1, 6, 5,       # x=1 face
+    ]
+    return {'name': 'cube', 'vertices': vertices, 'indices': indices}
+
+
+class TestSceneExport:
+    """Whole-scene export from client-supplied world-space meshes (/api/export/scene).
+
+    The frontend snapshots every visible object with its transform baked into the
+    vertex data, so these tests feed meshes that already sit at their final
+    positions - including objects that would live in different backend sessions.
+    """
+
+    def test_scene_export_stl_merges_all_meshes(self, app_client):
+        """STL merge includes every mesh and preserves their baked-in positions."""
+        meshes = [_unit_cube_mesh((0, 0, 0)), _unit_cube_mesh((50, 0, 0))]
+        resp = app_client.post('/api/export/scene', json={'format': 'stl', 'meshes': meshes})
+        assert resp.status_code == 200
+        num_tris = struct.unpack('<I', resp.data[80:84])[0]
+        # Both cubes must survive the merge.
+        assert num_tris == 24
+
+        xs = []
+        for i in range(num_tris):
+            base = 84 + i * 50
+            for j in range(3):
+                x, _, _ = struct.unpack_from('<fff', resp.data, base + 12 + j * 12)
+                xs.append(x)
+        # Positions survive the merge: one cluster near the origin, one at +50
+        assert min(xs) < 5 and max(xs) > 49
+
+    def test_scene_export_stl_mixed_indexed_and_soup(self, app_client):
+        """Indexed and unindexed (triangle-soup) meshes both survive the merge."""
+        soup = {'name': 'soup', 'vertices': [0, 0, 0, 10, 0, 0, 0, 10, 0]}
+        resp = app_client.post('/api/export/scene', json={'format': 'stl', 'meshes': [_unit_cube_mesh(), soup]})
+        assert resp.status_code == 200
+        num_tris = struct.unpack('<I', resp.data[80:84])[0]
+        assert num_tris == 13
+
+    def test_scene_export_obj_merges_all_meshes(self, app_client):
+        """OBJ merge writes every mesh's faces at their world positions."""
+        meshes = [_unit_cube_mesh((0, 0, 0)), _unit_cube_mesh((50, 0, 0))]
+        resp = app_client.post('/api/export/scene', json={'format': 'obj', 'meshes': meshes})
+        assert resp.status_code == 200
+        text = resp.data.decode()
+        faces = sum(1 for line in text.splitlines() if line.startswith('f '))
+        assert faces == 24
+        xs = [float(line.split()[1]) for line in text.splitlines() if line.startswith('v ')]
+        assert min(xs) < 5 and max(xs) > 49
+
+    def test_scene_export_ply_concatenates_all_meshes(self, app_client):
+        """PLY concatenates every mesh's vertices into one file."""
+        meshes = [_unit_cube_mesh((0, 0, 0)), _unit_cube_mesh((50, 0, 0))]
+        resp = app_client.post('/api/export/scene', json={'format': 'ply', 'meshes': meshes})
+        assert resp.status_code == 200
+        # 8 + 8 vertices from the two cubes
+        assert b'element vertex 16' in resp.data
+
+    def test_scene_export_3mf_keeps_meshes_separate(self, app_client):
+        """3MF packs every mesh as its own object in one archive."""
+        import zipfile
+        meshes = [_unit_cube_mesh((0, 0, 0)), _unit_cube_mesh((50, 0, 0))]
+        resp = app_client.post('/api/export/scene', json={'format': '3mf', 'meshes': meshes})
+        assert resp.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(resp.data))
+        names = zf.namelist()
+        model_name = next(n for n in names if n.endswith('.model'))
+        model_xml = zf.read(model_name).decode('utf-8')
+        assert model_xml.count('<object id=') == 2
+
+    def test_scene_export_3mf_writes_item_transforms(self, app_client):
+        """3MF keeps models unmerged and stores positional data as item transforms."""
+        import zipfile
+        # column-major world matrix (three.js Matrix4.elements order)
+        moved = _unit_cube_mesh()
+        moved['name'] = 'moved'
+        moved['transform'] = [0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 5, 2, 3, 1]
+
+        resp = app_client.post('/api/export/scene', json={'format': '3mf', 'meshes': [_unit_cube_mesh(), moved]})
+        assert resp.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(resp.data))
+        names = zf.namelist()
+        model_name = next(n for n in names if n.endswith('.model'))
+        model_xml = zf.read(model_name).decode('utf-8')
+
+        # Models stay separate; the untransformed item has no positional data.
+        assert model_xml.count('<object id=') == 2
+        assert '<item objectid="1"/>' in model_xml
+        # The second item keeps its world matrix, transposed to the spec's row-major order
+        expected = '0.0 1.0 0.0 5.0 -1.0 0.0 0.0 2.0 0.0 0.0 1.0 3.0 0.0 0.0 0.0 1.0'
+        assert f'<item objectid="2" transform="{expected}"/>' in model_xml
+        # Vertices stay local; positions are not baked into the geometry
+        assert 'x="5.' not in model_xml
+
+    def test_scene_export_3mf_round_trip_keeps_positions(self, app_client):
+        """Re-importing a saved 3MF restores each model's archive position."""
+        moved = _unit_cube_mesh()
+        moved['name'] = 'moved'
+        # column-major rotZ(-90deg) + T(5,2,3); local corner (0,1,0) maps to (6,2,3)
+        moved['transform'] = [0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 5, 2, 3, 1]
+
+        resp = app_client.post('/api/export/scene', json={'format': '3mf', 'meshes': [_unit_cube_mesh(), moved]})
+        assert resp.status_code == 200
+
+        data = {'file': (io.BytesIO(resp.data), 'project.3mf')}
+        import_resp = app_client.post('/api/import', data=data, content_type='multipart/form-data')
+        assert import_resp.status_code == 200
+        objects = import_resp.get_json()['objects']
+
+        # The archive round-trips as separate models, not a merged pool
+        assert len(objects) == 2
+
+        triples = [tuple(obj['vertices'][i:i + 3]) for obj in objects for i in range(0, len(obj['vertices']), 3)]
+        # Transformed mesh corners must land at archive positions.
+        assert any(abs(x - 5) < 1e-9 and abs(y - 2) < 1e-9 and abs(z - 3) < 1e-9 for x, y, z in triples)
+        assert any(abs(x - 6) < 1e-9 and abs(y - 2) < 1e-9 and abs(z - 3) < 1e-9 for x, y, z in triples)
+
+    def test_scene_export_requires_meshes(self, app_client):
+        """Scene export without meshes returns 400."""
+        resp = app_client.post('/api/export/scene', json={'format': 'stl', 'meshes': []})
+        assert resp.status_code == 400
+
+    def test_scene_export_unknown_format_returns_400(self, app_client):
+        """Scene export with an unsupported format returns 400."""
+        resp = app_client.post('/api/export/scene', json={'format': 'xyz', 'meshes': [_unit_cube_mesh()]})
+        assert resp.status_code == 400
+
+
+# --- CSG Operation Tests
 
 class TestCSGUnion:
     def test_union_requires_two_objects(self, app_client):
@@ -447,7 +638,7 @@ class TestCSGUnion:
         assert resp.status_code == 400
 
     def test_union_overlapping_cubes(self, app_client):
-        """Union of two overlapping cubes produces merged mesh."""
+        """Union of two overlapping cubes produces a merged mesh."""
         session_id = store._generate_id()
         _, obj1 = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         _, obj2 = _create_manifold_cube(app_client, offset=(0.5, 0.5, 0.5), session_id=session_id)
@@ -483,7 +674,7 @@ class TestCSGUnion:
         assert resp.status_code == 404
 
     def test_union_replaces_originals(self, app_client):
-        """Union removes original objects and keeps only result."""
+        """Union removes the originals and keeps only the result."""
         session_id = store._generate_id()
         _, obj1 = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         _, obj2 = _create_manifold_cube(app_client, offset=(0.5, 0.5, 0.5), session_id=session_id)
@@ -520,7 +711,7 @@ class TestCSGSubtract:
         assert resp.status_code == 404
 
     def test_subtract_overlapping_cubes(self, app_client):
-        """Subtraction of overlapping cube produces valid result."""
+        """Subtraction of overlapping cubes produces a valid result."""
         session_id = store._generate_id()
         # Base: unit cube at origin
         _, base_id = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
@@ -548,7 +739,7 @@ class TestCSGIntersect:
         assert resp.status_code == 400
 
     def test_intersect_overlapping_cubes(self, app_client):
-        """Intersect of overlapping cubes produces valid result."""
+        """Intersect of overlapping cubes produces a valid result."""
         session_id = store._generate_id()
         _, obj1 = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         _, obj2 = _create_manifold_cube(app_client, offset=(0.5, 0.5, 0.5), session_id=session_id)
@@ -560,7 +751,7 @@ class TestCSGIntersect:
         assert resp.status_code == 200
 
     def test_intersect_non_overlapping_returns_error(self, app_client):
-        """Intersect of non-overlapping objects returns error."""
+        """Intersect of non-overlapping cubes returns 400."""
         session_id = store._generate_id()
         _, obj1 = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         _, obj2 = _create_manifold_cube(app_client, offset=(5.0, 5.0, 5.0), session_id=session_id)
@@ -569,23 +760,23 @@ class TestCSGIntersect:
             'session_id': session_id,
             'object_ids': [obj1, obj2],
         })
-        # Non-overlapping should return an error from manifold
+        # Manifold rejects the empty intersection.
         assert resp.status_code == 400
 
 
-# ── Geometry Operation Tests ─────────────────────────────────────────────
+# --- Geometry Operation Tests
 
-class TestGeometryRepair:
-    def test_repair_requires_params(self, app_client):
-        """Repair without required params returns 400."""
-        resp = app_client.post('/api/geometry/repair', json={})
+class TestGeometrySolid:
+    def test_solid_requires_params(self, app_client):
+        """Solid without required params returns 400."""
+        resp = app_client.post('/api/geometry/solid', json={})
         assert resp.status_code == 400
 
-    def test_repair_valid_mesh(self, app_client):
-        """Repairing a valid manifold mesh succeeds."""
+    def test_solid_valid_mesh(self, app_client):
+        """Solidifying a valid manifold mesh succeeds."""
         session_id = store._generate_id()
         _, obj_id = _create_manifold_cube(app_client, session_id=session_id)
-        resp = app_client.post('/api/geometry/repair', json={
+        resp = app_client.post('/api/geometry/solid', json={
             'session_id': session_id,
             'object_id': obj_id,
         })
@@ -594,9 +785,9 @@ class TestGeometryRepair:
         assert 'id' in result
         assert 'vertices' in result
 
-    def test_repair_object_not_found(self, app_client):
-        """Repair with non-existent object returns error."""
-        resp = app_client.post('/api/geometry/repair', json={
+    def test_solid_object_not_found(self, app_client):
+        """Solid with a non-existent object returns 400."""
+        resp = app_client.post('/api/geometry/solid', json={
             'session_id': 'nonexistent',
             'object_id': 'xyz',
         })
@@ -610,7 +801,7 @@ class TestGeometryHollow:
         assert resp.status_code == 400
 
     def test_hollow_with_wall_thickness(self, app_client):
-        """Hollow with reasonable wall thickness produces shell."""
+        """Hollow with a reasonable wall thickness produces a shell."""
         session_id = store._generate_id()
         _, obj_id = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         resp = app_client.post('/api/geometry/hollow', json={
@@ -621,11 +812,11 @@ class TestGeometryHollow:
         assert resp.status_code == 200
 
     def test_hollow_too_thick_wall_returns_error(self, app_client):
-        """Hollow with wall thickness exceeding mesh size returns error."""
+        """Hollow with a wall thicker than the mesh returns 400."""
         session_id = store._generate_id()
         _, obj_id = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
 
-        # Very thick wall on a small mesh should fail gracefully
+        # A wall this thick must fail cleanly.
         resp = app_client.post('/api/geometry/hollow', json={
             'session_id': session_id,
             'object_id': obj_id,
@@ -890,7 +1081,7 @@ class TestGeometryInfo:
         assert 'bbox_max' in data
 
 
-# ── Primitive Creation Tests ─────────────────────────────────────────────
+# --- Primitive Creation Tests
 
 class TestPrimitives:
     def test_create_cube(self, app_client):
@@ -952,7 +1143,7 @@ class TestPrimitives:
         assert len(result['objects']) >= 1
 
     def test_unknown_primitive_type_returns_400(self, app_client):
-        """Unknown primitive type returns 400 error."""
+        """Unknown primitive type returns 400."""
         resp = app_client.post('/api/primitives/create', json={'type': 'pyramid'})
         assert resp.status_code == 400
 
@@ -975,22 +1166,22 @@ class TestPrimitives:
         assert resp.status_code == 200
 
 
-# ── Error Handling Tests ─────────────────────────────────────────────────
+# --- Error Handling Tests
 
 class TestErrorHandling:
     def test_invalid_json_body(self, app_client):
-        """Sending invalid JSON to a POST endpoint returns appropriate error."""
+        """Invalid JSON on a POST endpoint is rejected (400/415)."""
         resp = app_client.post('/api/geometry/scale', data='not json', content_type='application/json')
         assert resp.status_code in (400, 415)
 
     def test_missing_session_id_on_all_endpoints(self, app_client):
         """All endpoints that require session_id return 400 without it."""
-        # Test each endpoint that requires session_id
+        # Every listed endpoint must reject a missing session_id.
         endpoints = [
             '/api/csg/union',
             '/api/csg/subtract',
             '/api/csg/intersect',
-            '/api/geometry/repair',
+            '/api/geometry/solid',
             '/api/geometry/hollow',
             '/api/geometry/cut',
             '/api/geometry/scale',
@@ -1004,7 +1195,7 @@ class TestErrorHandling:
             assert resp.status_code == 400, f'{endpoint} should return 400 without session_id'
 
     def test_nonexistent_object_id(self, app_client):
-        """Operations on non-existent objects return 404."""
+        """Scaling a non-existent object returns 400."""
         resp = app_client.post('/api/geometry/scale', json={
             'session_id': 'nonexistent',
             'object_id': 'xyz',
@@ -1013,14 +1204,14 @@ class TestErrorHandling:
         assert resp.status_code == 400
 
 
-# ── Session Management Tests ─────────────────────────────────────────────
+# --- Session Management Tests
 
 class TestSessionManagement:
     def test_session_persists_across_requests(self, app_client, unit_cube_file):
         """Objects added in one request are available in subsequent requests."""
         session_id, obj_id = _import_cube(app_client, unit_cube_file)
 
-        # Make another request using the same session
+        # A second request reuses the same session.
         resp = app_client.get(f'/api/geometry/info?session_id={session_id}&object_id={obj_id}')
         assert resp.status_code == 200
 
@@ -1039,7 +1230,7 @@ class TestSessionManagement:
         """After an operation, original object is removed and replaced with result."""
         session_id, obj_id = _import_cube(app_client, unit_cube_file)
 
-        # Scale the object (replaces it in session)
+        # Scaling replaces the object in the session.
         resp = app_client.post('/api/geometry/scale', json={
             'session_id': session_id,
             'object_id': obj_id,
@@ -1047,17 +1238,17 @@ class TestSessionManagement:
         })
         assert resp.status_code == 200
 
-        # Original object should be gone
+        # The original must be gone.
         original = store.get_object(session_id, obj_id)
         assert original is None
 
-        # New result object should exist
+        # The new result object must exist.
         result = resp.get_json()
         new_obj = store.get_object(session_id, result['id'])
         assert new_obj is not None
 
 
-# ── End-to-End Workflow Tests ────────────────────────────────────────────
+# --- End-to-End Workflow Tests
 
 class TestWorkflows:
     def test_full_import_to_export_workflow(self, app_client, unit_cube_file):
@@ -1078,7 +1269,7 @@ class TestWorkflows:
         """Create two objects → union them → verify result exists."""
         session_id = store._generate_id()
 
-        # Create two overlapping cubes directly in session (manifold-ready)
+        # Two overlapping manifold-ready cubes in the session.
         _, obj1 = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
         _, obj2 = _create_manifold_cube(app_client, offset=(0.5, 0.5, 0.5), session_id=session_id)
 
@@ -1090,7 +1281,7 @@ class TestWorkflows:
         assert resp.status_code == 200
         result = resp.get_json()
 
-        # Verify union result can be exported
+        # The union result must export cleanly.
         resp = app_client.get(f'/api/export?session_id={session_id}&object_id={result["id"]}&format=stl')
         assert resp.status_code == 200
 
@@ -1147,7 +1338,7 @@ class TestWorkflows:
         session_id = store._generate_id()
         _, obj_id = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
 
-        # Hollow with thin wall on a larger cube (need bigger mesh for hollow to work)
+        # Enlarge the cube first so a 1-unit wall fits.
         resp = app_client.post('/api/geometry/scale', json={
             'session_id': session_id,
             'object_id': obj_id,
@@ -1173,7 +1364,7 @@ class TestWorkflows:
         """Create primitive → store in session → export."""
         session_id = store._generate_id()
 
-        # Create cube and store in session
+        # Create a cube in the session.
         resp = app_client.post('/api/primitives/create', json={
             'session_id': session_id,
             'type': 'cube',
@@ -1194,7 +1385,7 @@ class TestWorkflows:
         # Create base cube
         _, base_id = _create_manifold_cube(app_client, offset=(0.0, 0.0, 0.0), session_id=session_id)
 
-        # Create tool cube (overlapping - unit cubes at origin and shifted by 0.5 overlap)
+        # Tool cube overlaps the base by design.
         _, tool_id = _create_manifold_cube(app_client, offset=(0.5, 0.5, 0.5), session_id=session_id)
 
         # Subtract
@@ -1206,7 +1397,7 @@ class TestWorkflows:
         assert resp.status_code == 200
         result = resp.get_json()
 
-        # Get the updated object ID (subtract returns {'updated': [...], ...})
+        # Subtract reports the replacement under 'updated'.
         updated_id = result['updated'][0]['id'] if result.get('updated') else None
         assert updated_id is not None, 'Subtract should have produced an updated object'
 

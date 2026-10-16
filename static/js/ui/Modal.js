@@ -12,7 +12,7 @@ const Modal = (() => {
             const dialog = document.createElement('div');
             dialog.className = 'modal-dialog';
 
-            // Header row - dialog title plus a close button for dismissing without choosing an action
+            // Header row - title plus close button; closing resolves null
             const header = document.createElement('div');
             header.className = 'modal-header';
 
@@ -31,12 +31,12 @@ const Modal = (() => {
             header.appendChild(titleEl);
             header.appendChild(closeBtn);
 
-            // Body content - caller-supplied raw HTML, injected as-is into the overlay
+            // Body content - caller-supplied HTML, injected as-is
             const body = document.createElement('div');
             body.className = 'modal-body';
             body.innerHTML = bodyHTML;
 
-            // Footer action buttons built from the passed-in options array
+            // Footer buttons built from the options array
             const footer = document.createElement('div');
             footer.className = 'modal-footer';
 
@@ -64,7 +64,7 @@ const Modal = (() => {
             dialog.appendChild(footer);
             overlay.appendChild(dialog);
 
-            // Clicking the dimmed backdrop dismisses without resolving a value
+            // Backdrop clicks dismiss without resolving a value
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
                     overlay.remove();
@@ -98,18 +98,17 @@ function _defaultHollowThickness(dims) {
 }
 
 /**
-     * Hollow tool modal: controls for wall thickness and opening size.
+ * Hollow tool modal: controls for wall thickness and opening size.
  *
  * @param {{width:number, height:number, depth:number}|null} dims
- *   Bounding box of the selected object being hollowed; drives the smart
- *   default (5% of longest side) and the slider range.
+ *   Bounding box of the selected object; drives the smart default (5% of
+ *   longest side) and the slider range.
  */
 async function showHollowModal(dims = null) {
     const defaultThickness = _defaultHollowThickness(dims);
     const maxDim = dims ? Math.max(dims.width, dims.height, dims.depth) : null;
-    // The slider stays usable at the object's real scale, while the number
-    // input accepts anything - the backend clamps values too large for the
-    // geometry.
+    // Slider stays usable at the object's real scale; the number input
+    // accepts anything - the backend clamps oversized values.
     const thicknessSliderMax = maxDim ? Math.max(maxDim * 0.49, defaultThickness * 2) : 10;
     const thicknessSliderMaxDisplay = thicknessSliderMax.toFixed(thicknessSliderMax < 10 ? 2 : 1);
     const thicknessStep = Math.max(0.01, parseFloat((defaultThickness / 10).toFixed(3)));
@@ -153,8 +152,7 @@ async function showHollowModal(dims = null) {
         }
     ]);
 
-    // Pair each number input with its slider; listeners attach now that the
-    // overlay is already in the DOM.
+    // Pair each number input with its slider (overlay is already in the DOM)
     const thicknessInput = document.getElementById('modal-wall-thickness-input');
     const thicknessSlider = document.getElementById('modal-wall-thickness');
     if (thicknessInput && thicknessSlider) {
@@ -294,15 +292,14 @@ async function showExportModal() {
 const FORMAT_INFO = {
     stl: 'The 3D-printing standard - every slicer and print service accepts it. Stores geometry only, so colors and metadata are not included.',
     obj: 'Plain-text and easy to inspect or edit in other tools. Keeps smooth-shading normals but no color data, and files tend to run larger than STL or PLY.',
-    ply: 'Keeps per-vertex colors and normals in a compact binary file. Slicers support it less widely than STL.'
+    ply: 'Keeps per-vertex colors and normals in a compact binary file. Slicers support it less widely than STL.',
+    '3mf': 'Print-ready archive that keeps colors, materials, and every object of the scene in one file - accepted by most slicers.'
 };
 
 
 /**
- * Save dialog - one selectable card per format (no quick presets): it always
- * saves the entire scene in one file, never a single selected shape. Each
- * card shows the format name next to its description so all options are
- * visible at once instead of swapping an info line under the chips.
+ * Save dialog - one selectable card per format; always saves the entire
+ * scene in a single file, never just the selected shape.
  */
 async function showSaveModal() {
     const cardsHTML = Object.keys(FORMAT_INFO).map((fmt, i) => `
@@ -364,6 +361,7 @@ async function _showFormatModal(title, actionLabel, showPresets = true) {
             <div class="format-chip active" data-format="stl">STL</div>
             <div class="format-chip" data-format="obj">OBJ</div>
             <div class="format-chip" data-format="ply">PLY</div>
+            <div class="format-chip" data-format="3mf">3MF</div>
         </div>
     `;
 
@@ -455,7 +453,7 @@ async function showPrimitiveModal(preselectedType = null) {
         }
     ]);
 
-    // Parameter fields re-render to match the chosen type; listeners attach now
+    // Parameter fields re-render to match the chosen type
     const typeSelect = document.getElementById('modal-primitive-type');
     const paramsDiv = document.getElementById('modal-primitive-params');
 
@@ -529,7 +527,7 @@ function _defaultEdgeAmount(dims) {
     const minDim = Math.min(dims.width, dims.height, dims.depth);
     if (!isFinite(minDim) || minDim <= 0) return 1.0;
     const amount = minDim * 0.05;
-    // Precision scales with magnitude - more decimals for sub-millimeter values
+    // More decimals for sub-millimeter values
     const decimals = amount < 1 ? 3 : (amount < 10 ? 2 : 1);
     return Math.max(0.01, parseFloat(amount.toFixed(decimals)));
 }
@@ -549,8 +547,7 @@ function _linkInputAndSlider(inputEl, sliderEl, { min, decimals = 2 } = {}) {
         const raw = parseFloat(inputEl.value);
         if (isNaN(raw)) return;
         const v = clampMin(raw);
-        // Typed values beyond the slider's range get clamped by the browser
-        // itself (ColliBoy)
+        // Typed values beyond the slider's range get clamped by the browser itself (ColliBoy)
         sliderEl.value = v;
     });
 }
@@ -565,9 +562,8 @@ function _linkInputAndSlider(inputEl, sliderEl, { min, decimals = 2 } = {}) {
 async function showFilletModal(dims = null) {
     const defaultRadius = _defaultEdgeAmount(dims);
     const minDim = dims ? Math.min(dims.width, dims.height, dims.depth) : null;
-    // The slider stays usable at the object's real scale, while the number
-    // input accepts anything - the backend clamps values too large for the
-    // geometry.
+    // Slider stays usable at the object's real scale; the number input
+    // accepts anything - the backend clamps oversized values.
     const sliderMax = minDim ? Math.max(minDim * 0.49, defaultRadius * 2) : 20;
     const sliderMaxDisplay = sliderMax.toFixed(sliderMax < 10 ? 2 : 1);
     const step = Math.max(0.01, parseFloat((defaultRadius / 10).toFixed(3)));

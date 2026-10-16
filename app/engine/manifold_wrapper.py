@@ -1,4 +1,4 @@
-"""Manifold3D-backed mesh engine: CSG booleans, repair, hollowing, plane cuts, transforms, simplification, smoothing, and primitive generation.
+"""Manifold3D-backed mesh engine: CSG booleans, solidify, hollowing, plane cuts, transforms, simplification, smoothing, and primitive generation.
 
 Every public function takes and returns plain numpy arrays - vertices (N, 3) float32 positions plus tri_indices (T, 3) uint32 vertex indices - so callers never touch the binding types directly.
 """
@@ -32,10 +32,8 @@ def _to_manifold(vertices: np.ndarray, tri_indices: np.ndarray) -> m.Manifold:
     vertices are snapped to a 0.001 grid (closing float-noise seams) and an
     edge-merging repair pass is tried before giving up with ManifoldError.
     """
-    # Imported STLs carry float noise - vertices that should coincide differ by
-    # ~1e-6. Snapping to a 0.001 grid welds those seams shut with no visible
-    # geometry loss at typical model scales, which is what makes the mesh
-    # watertight enough for boolean operations.
+    # Imported STLs carry float noise (~1e-6) between coincident vertices; a
+    # 0.001 grid snap welds those seams shut with no visible loss at typical scales.
     rounded_vertices = np.round(vertices.astype(np.float64), decimals=3).astype(np.float32)
 
     mesh = _to_mesh(rounded_vertices, tri_indices)
@@ -180,11 +178,11 @@ def intersect(
     return _extract_mesh(result, "intersect")
 
 
-def repair(
+def solidify(
     vertices: np.ndarray,
     tri_indices: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Repair a non-watertight mesh.
+    """Make a non-watertight mesh into a valid watertight solid.
 
     Tries, in order: dedupe exact-duplicate triangles (compacting the vertex
     buffer), then snap vertices at decreasing precision (3/2/1 decimals) with
@@ -230,7 +228,7 @@ def repair(
 
     # Every strategy exhausted; surface the last status code for diagnosis
     raise ManifoldError(
-        f"Repair failed with error code: {status}. "
+        f"Solidify failed with error code: {status}. "
         f"This mesh may have self-intersections, non-watertight geometry, "
         f"or other issues that cannot be automatically fixed. "
         f"Try importing a different file or checking the model in 3D software."
@@ -1004,10 +1002,8 @@ def create_torus(
     minor_segments: int = 12
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Torus (donut) built from an exact signed-distance function via manifold's level_set."""
-    # Manifold's level_set uses positive = inside, the opposite of the usual
-    # graphics SDF convention. The exact torus distance sqrt((r_xy - R)^2 + z^2) - r
-    # is negative inside / positive outside, so it is negated to match - the
-    # zero crossing (the surface itself) lands in the same place either way.
+    # Manifold's level_set treats positive as inside (opposite of graphics SDF
+    # convention), so negate the exact torus distance; the zero crossing is unchanged.
     def torus_sdf(x: float, y: float, z: float) -> float:
         r_xy = math.sqrt(x**2 + y**2)
         return -(math.sqrt((r_xy - major_radius) ** 2 + z**2) - minor_radius)

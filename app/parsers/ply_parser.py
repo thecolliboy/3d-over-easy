@@ -73,7 +73,7 @@ def detect_ply_format(data: bytes) -> str:
                 if 'ascii' in stripped:
                     return 'ascii'
 
-    # control characters inside the first block betray a binary payload
+    # non-printable bytes in the leading block indicate a binary payload
     has_non_printable = any(b < 9 or (b > 13 and b < 32) for b in data[:80])
     if has_non_printable:
         return 'binary_little_endian'
@@ -402,7 +402,7 @@ def _write_ascii_ply(vertices, normals, colors, faces, num_verts):
         lines.append('property float nz')
 
     if colors:
-        # color channels ride as uchar values in the 0-255 range
+        # color channels stored as uchar (0-255)
         lines.append('property uchar red')
         lines.append('property uchar green')
         lines.append('property uchar blue')

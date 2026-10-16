@@ -1,12 +1,10 @@
 """Regression tests for undo/redo restoring exact session state.
 
-Operations replace objects with brand-new ids (scale, union, etc.), so undo must
-bring back every object that existed before the operation - and drop everything
-the operation created or removed - while redo re-applies the operation itself.
-These tests pin down both directions against a multi-object session where an
-unrelated "bystander" model must survive untouched.
+Operations replace objects with new ids (scale, union), so undo restores every
+pre-op object and drops what the operation created; redo re-applies it. Each
+test pins both directions against a multi-object session where an unrelated
+"bystander" model must survive untouched.
 """
-# ColliBoy
 
 import uuid
 
@@ -96,8 +94,7 @@ class TestUndo:
         assert resp.status_code == 200
         result = resp.get_json()
 
-        # The response must carry the complete restored session - not just the
-        # affected object - otherwise unrelated models vanish from the viewport.
+        # Response must carry the full restored session, not just the affected object.
         returned_ids = {obj['id'] for obj in result['objects']}
         assert returned_ids == pre_ids
         assert _session_object_ids(session_id) == pre_ids
@@ -148,8 +145,7 @@ class TestUndo:
         assert resp.status_code == 200
         scaled_b = resp.get_json()['id']
 
-        # After both scales the session holds two replaced objects; each undo
-        # walks back one step: first to {scaled_a, cube_b}, then to the start.
+        # Each undo walks back one step: {scaled_a, cube_b} first, then the start.
         for expected in ({scaled_a, cube_b}, pre_ids):
             resp = app_client.post('/api/history/undo', json={'session_id': session_id})
             assert resp.status_code == 200
@@ -185,9 +181,7 @@ class TestCutPreview:
         result = resp.get_json()
         assert len(result['pieces']) == 2
 
-        # The object is untouched and no history entry was created - previews fire
-        # on every plane drag while in split mode, so any mutation here would leak
-        # throwaway objects that undo resurrects.
+        # Previews must not mutate or record history; they fire on every plane drag.
         assert _session_object_ids(session_id) == {cube_a}
         info = store.get_history_info(session_id)
         assert info['undo_count'] == 0 and info['redo_count'] == 0
@@ -210,7 +204,7 @@ class TestCutPreview:
             assert resp.status_code == 200
         assert _session_object_ids(session_id) == {cube_a, bystander}
 
-        # The authoritative cut (what confirm issues) consumes the original
+        # Real cut (what confirm issues) replaces the original object
         resp = app_client.post('/api/geometry/cut', json={
             'session_id': session_id,
             'object_id': cube_a,

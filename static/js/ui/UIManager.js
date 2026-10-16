@@ -20,6 +20,7 @@ export class UIManager {
         this.messagesMuted = options.messages_muted ?? false;
         this._cacheElements();
         this._bindEvents();
+        this._initToolbarSqueeze();
     }
 
     _cacheElements() {
@@ -81,10 +82,17 @@ export class UIManager {
         this.btnGridSize = document.getElementById('btn-grid-size');
         this.btnSmartSnap = document.getElementById('btn-smart-snap');
         this.btnDayMode = document.getElementById('btn-day-mode');
+        this.btnSettings = document.getElementById('btn-settings');
+        this.btnTipMode = document.getElementById('btn-tip-mode');
+        this.btnViewCube = document.getElementById('btn-view-cube');
+        this.tipBox = document.getElementById('tip-box');
+        this.tipBoxTitle = document.getElementById('tip-box-title');
+        this.tipBoxDesc = document.getElementById('tip-box-desc');
         this.rotatePivotControl = document.getElementById('rotate-pivot-control');
         this.chkRotatePivotCenter = document.getElementById('chk-rotate-pivot-center');
         this.scaleRatioControl = document.getElementById('scale-ratio-control');
         this.chkLockRatio = document.getElementById('chk-lock-ratio');
+        this.toolbar = document.getElementById('toolbar');
 
         // Generation-panel DOM element references
         this.aiModal = document.getElementById('ai-modal');
@@ -233,16 +241,8 @@ export class UIManager {
             });
         }
 
-        // Collapsible right-hand panel sections: clicking a header hides its body,
-        // rotates the chevron, and keeps aria-expanded in sync for screen readers.
-        document.querySelectorAll('#properties-panel .panel-toggle').forEach(header => {
-            const section = header.closest('.panel-section');
-            if (!section) return;
-            header.addEventListener('click', () => {
-                const collapsed = section.classList.toggle('collapsed');
-                header.setAttribute('aria-expanded', String(!collapsed));
-            });
-        });
+        // Collapsible right-hand panel sections are owned by RightPanel (see
+        // ui/RightPanel.js), which also drives the priority auto-collapse.
 
         // Split mode panel - Move/Rotate switch plus OK/Cancel buttons
         if (this.btnSplitModeMove) {
@@ -377,9 +377,7 @@ export class UIManager {
         };
 
         // Build-plate controls emit events like the other tools so App - the
-        // owner of the sceneController reference - handles them; earlier inline
-        // handlers here referenced an out-of-scope variable and threw a
-        // ReferenceError on click, leaving these buttons dead.
+        // owner of the sceneController reference - handles them.
         this.btnPlateToggle.addEventListener('click', () => this._emit('toggleBuildPlate'));
         if (this.btnAxisToggle) {
             this.btnAxisToggle.addEventListener('click', () => this._emit('toggleAxisVisible'));
@@ -422,6 +420,21 @@ export class UIManager {
             this.btnAestheticMode.addEventListener('click', () => this._emit('toggleAestheticMode'));
         }
 
+        // Settings button at the bottom-right of the status bar; opens the .config editor popup.
+        if (this.btnSettings) {
+            this.btnSettings.addEventListener('click', () => this._emit('openSettings'));
+        }
+
+        // Tip-mode toggle in the right side of the status bar; off by default.
+        if (this.btnTipMode) {
+            this.btnTipMode.addEventListener('click', () => this._emit('toggleTipMode'));
+        }
+
+        // Orientation-indicator toggle in the right side of the status bar; on by default.
+        if (this.btnViewCube) {
+            this.btnViewCube.addEventListener('click', () => this._emit('toggleViewCube'));
+        }
+
         // Rotate pivot checkbox, visible only while in Rotate mode
         if (this.chkRotatePivotCenter) {
             this.chkRotatePivotCenter.addEventListener('change', (e) => {
@@ -436,10 +449,9 @@ export class UIManager {
             });
         }
 
-        // Object picking on viewport click. Capturing-phase listeners on the container
-        // fire before OrbitControls/TransformControls can swallow the event, and
-        // canvas-relative coordinates are derived from clientX/clientY so injected
-        // gizmo handles becoming e.target don't break the raycast.
+        // Object picking on viewport click. Capturing-phase listeners fire before
+        // OrbitControls/TransformControls can swallow the event, and coordinates come
+        // from clientX/clientY so gizmo handles becoming e.target don't break the raycast.
         const canvas = this.elements['viewport-canvas'];
         let pointerDownPos = null;
 
@@ -480,6 +492,52 @@ export class UIManager {
 
     on(event, callback) {
         this.callbacks[event] = callback;
+    }
+
+    /**
+     * Three-tier toolbar squeeze. Applies the widest tier that fits the current
+     * width as a .squeeze-tier-N class on #toolbar:
+     *   1 - icon + label side by side (the default layout)
+     *   2 - labels stacked under their icons in a smaller font
+     *   3 - icons only; labels hidden entirely
+     * Buttons never shrink below their natural size, so a label is always shown
+     * in full or not at all - never truncated partway.
+     */
+    _initToolbarSqueeze() {
+        const toolbar = this.toolbar;
+        if (!toolbar) return;
+        this._currentSqueezeTier = 0;
+        this._updateSqueezeTier();
+        let scheduled = false;
+        const scheduleUpdate = () => {
+            if (scheduled) return;
+            scheduled = true;
+            requestAnimationFrame(() => {
+                scheduled = false;
+                this._updateSqueezeTier();
+            });
+        };
+        if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(scheduleUpdate).observe(toolbar);
+        } else {
+            window.addEventListener('resize', scheduleUpdate);
+        }
+    }
+
+    _updateSqueezeTier() {
+        const toolbar = this.toolbar;
+        // Toolbar hidden (aesthetic mode) - keep the last applied tier as-is
+        if (!toolbar || toolbar.clientWidth === 0) return;
+        for (let tier = 1; tier <= 3; tier++) {
+            if (this._currentSqueezeTier !== tier) {
+                for (const n of [1, 2, 3]) toolbar.classList.remove(`squeeze-tier-${n}`);
+                toolbar.classList.add(`squeeze-tier-${tier}`);
+                this._currentSqueezeTier = tier;
+            }
+            // Reading scrollWidth forces layout with the candidate tier applied.
+            // If it fits, stop here; otherwise try a more compressed tier.
+            if (toolbar.scrollWidth <= toolbar.clientWidth + 0.5) return;
+        }
     }
 
     showLoading(text = 'Processing...') {
@@ -708,12 +766,10 @@ export class UIManager {
             dropZone.style.display = show ? 'block' : 'none';
         }
         if (show) {
-            // Whenever the empty-state pop-up appears, reframe the camera to
-            // the default view rather than whatever angle/zoom the removed
-            // objects left behind. UIManager holds no scene/camera reference,
-            // so it dispatches an event and the App-level listener performs
-            // the reset - centralizing it here means every call site (current
-            // or future) gets this behavior for free.
+            // Reframe the camera when the empty-state pop-up appears, rather than
+            // keep whatever angle/zoom the removed objects left behind. UIManager
+            // holds no scene reference, so it dispatches an event and the
+            // App-level listener performs the reset for every call site.
             window.dispatchEvent(new CustomEvent('dropzone-shown'));
         }
     }

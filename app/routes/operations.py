@@ -19,7 +19,7 @@ def get_operations_log():
         - session_id (required): the session to query
         - operation_type (optional): keep only entries of this kind (translate, rotate, scale, union, subtract, intersect, ...)
 
-    Response is a JSON array of timestamped operation entries, suitable for driving scripted pipelines.
+    Returns a JSON array of timestamped operation entries.
     """
     session_id = request.args.get('session_id')
     if not session_id:
@@ -28,7 +28,7 @@ def get_operations_log():
     try:
         operations = oplog.get_log(session_id)
 
-        # Keep only entries matching the requested operation type when the filter param is set (ColliBoy)
+        # Filter by operation_type if provided (ColliBoy)
         operation_type = request.args.get('operation_type')
         if operation_type:
             operations = [op for op in operations if op['operation'] == operation_type]

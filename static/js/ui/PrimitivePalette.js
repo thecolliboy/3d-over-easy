@@ -64,7 +64,7 @@ export class PrimitivePalette {
     }
 
     toggle() {
-        // open/close are mutually exclusive; flip whichever state we're in (ColliBoy)
+        // Toggle flips between open and close states (ColliBoy)
         if (this.isOpen) {
             this.close();
         } else {

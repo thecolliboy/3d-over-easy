@@ -13,8 +13,8 @@ import threading
 
 import pytest
 
-# The route module itself: `app.routes` re-exports each blueprint under the
-# same short name, so a plain attribute lookup would grab the Blueprint.
+# Import the route module directly: `app.routes` re-exports each blueprint
+# under the same short name, so a plain attribute lookup would grab the Blueprint.
 import importlib
 
 ai_routes = importlib.import_module('app.routes.ai')
@@ -151,8 +151,7 @@ class TestSaveProvider:
     def test_path_traversal_in_file_rejected(self, ai_client):
         client, models_dir = ai_client
         _write_provider(models_dir, 'a_b.json', provider_name='a', url='u', model_name='b')
-        # The traversal name does not exist under ai/models, so the update must
-        # fall back to minting a fresh file instead of touching anything else.
+        # Traversal names do not resolve under ai/models; the update falls back to a new file.
         resp = client.post('/api/ai/provider', json={
             'file': '../../../evil.json',
             'provider_name': 'a',
@@ -179,7 +178,7 @@ class TestDeleteProvider:
 
 
 class TestGenerateRouting:
-    """Verifies the subprocess command line /generate builds for each backend."""
+    """Verifies the subprocess command line that /generate builds per backend."""
 
     def _capture_job(self, monkeypatch):
         captured = {'cmd': None}

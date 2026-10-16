@@ -15,12 +15,12 @@
 
     <link rel="stylesheet" href="/static/css/app.css">
 
-    <!-- Pinned CDN build so bare "three" imports resolve without a bundler -->
+    <!-- Pinned three.js build for bundler-less imports; /lib/ when mirrored locally, else jsdelivr -->
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            "three": "{{ three_base_url }}build/three.module.js",
+            "three/addons/": "{{ three_base_url }}examples/jsm/"
         }
     }
     </script>
@@ -263,7 +263,7 @@
         </div>
     </div>
 
-    <!-- Quick-add panel for the six built-in shapes, hung centered below the toolbar -->
+    <!-- Quick-add panel for the six built-in shapes, docked centered below the toolbar -->
     <div id="primitives-palette" class="primitives-palette">
         <button class="primitive-btn" data-type="cube" title="Cube">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
@@ -315,10 +315,10 @@
                 </button>
             </div>
 
-            <!-- Setting-change toast beside the shading toggles; auto-hides after 10 s and is suppressed while muting is active -->
+            <!-- Setting-change toast beside the shading toggles; auto-hides after 10s, suppressed while muted -->
             <div id="toggle-message" class="toggle-message-toast" role="status" aria-live="polite"></div>
 
-            <!-- Plane move/rotate controls, visible only while a split is armed (ColliBoy) -->
+            <!-- Plane move/rotate controls, visible only while a split is armed -->
             <div id="split-mode-panel" class="split-mode-panel hidden">
                 <div class="split-mode-header">SPLIT</div>
                 <div class="split-mode-modes">
@@ -426,7 +426,7 @@
                 </select>
             </div>
 
-            <!-- Axis, plate, and drag-snap switches, docked bottom-right and always on screen -->
+            <!-- Axis, plate, and drag-snap switches, docked bottom-right; always visible -->
             <div id="build-plate-controls" style="display:flex;position:absolute;bottom:12px;right:12px;gap:4px;z-index:10;">
                 <button id="btn-axis-toggle" title="Toggle Axis Lines" class="view-mode-btn active" style="font-size:14px;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="12" y1="21" x2="12" y2="3" stroke="#4d94ff"/><line x1="3" y1="18" x2="19" y2="18" stroke="#ff4d4d"/><line x1="12" y1="18" x2="21" y2="9" stroke="#4dff88"/></svg>
@@ -446,6 +446,12 @@
                 </button>
             </div>
 
+            <!-- Box describing the hovered button, shown while tip mode is on -->
+            <div id="tip-box" class="tip-box hidden">
+                <div id="tip-box-title" class="tip-box-title"></div>
+                <div id="tip-box-desc" class="tip-box-desc"></div>
+            </div>
+
             <!-- Empty-state import prompt; reframes the camera to default view when it appears -->
             <div id="drop-zone" class="drop-zone">
                 <div class="drop-zone-box">
@@ -462,13 +468,12 @@
                         <span class="format-badge" title="GL Binary - compact GLTF binary format">GLB</span>
                         <span class="format-badge" title="GL Text - JSON-based 3D delivery format">GLTF</span>
                         <span class="format-badge" title="3D Manufacturing Format - preserves colors &amp; metadata">3MF</span>
-                        <span class="format-badge" title="Filmbox - Autodesk exchange format">FBX</span>
                         <span class="format-badge" title="Discreet 3D - mesh data only">DRC</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Busy indicator with spinner and progress bar during long operations -->
+            <!-- Busy overlay for long operations -->
             <div id="loading-overlay" class="loading-overlay hidden">
                 <div class="spinner"></div>
                 <p id="loading-text">Processing...</p>
@@ -478,7 +483,7 @@
             </div>
         </div>
 
-        <!-- Object list, live properties for the selection, and a keyboard cheatsheet; each section collapses on header click -->
+        <!-- Right panel: Scene Objects, Properties, Controls, About; collapsible sections that auto-collapse by priority when space runs short -->
         <div id="properties-panel">
             <div class="panel-section" data-panel-section="scene-objects">
                 <button type="button" class="panel-header panel-toggle" aria-expanded="true" aria-controls="object-list">
@@ -521,9 +526,15 @@
                 </div>
             </div>
 
-            <!-- Ad banner, pinned to the bottom of the right-hand menu; hidden while its host is unreachable -->
-            <div class="panel-banner" id="ad-banner">
-                <iframe src="https://ads.colliboy.com" title="ColliBoy ad"></iframe>
+            <!-- About: ColliBoy ad iframe in a collapsible section; hidden while the ad host is unreachable -->
+            <div class="panel-section panel-about" data-panel-section="about">
+                <button type="button" class="panel-header panel-toggle" aria-expanded="true" aria-controls="about-body">
+                    <span>About</span>
+                    <svg class="panel-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div id="about-body" class="panel-about-body panel-section-body">
+                    <iframe src="https://ads.colliboy.com" title="ColliBoy ad"></iframe>
+                </div>
             </div>
         </div>
     </div>
@@ -551,6 +562,12 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 12 15 2 8.5 12 2"/><polyline points="2 15.5 12 22 22 15.5"/></svg>
         </button>
         <button id="btn-render-stats-toggle" title="Toggle Render Stats" class="status-btn" style="font-size:10px;font-weight:600;width:auto;padding:0 8px;">⚡</button>
+        <button id="btn-tip-mode" title="Tip Mode - show a box describing whichever button you hover over" class="status-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <button id="btn-view-cube" title="Toggle Orientation Indicator (top-left axis gizmo)" class="status-btn active">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+        </button>
         <button id="btn-reset-view" title="Reset View" class="status-btn">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
         </button>
@@ -564,10 +581,13 @@
             <svg class="day-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             <svg class="night-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
+        <button id="btn-settings" title="Settings - edit the .config options" class="status-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
     </div>
 
-    <!-- Off-screen picker that every import path funnels through -->
-    <input type="file" id="file-input" accept=".stl,.obj,.fbx,.ply,.3mf,.glb,.gltf,.drc" multiple hidden>
+    <!-- Hidden file input shared by every import path -->
+    <input type="file" id="file-input" accept=".stl,.obj,.ply,.3mf,.glb,.gltf,.drc" multiple hidden>
 
     <!-- Single module entry point; all DOM wiring and viewport logic lives in main.js -->
     <script type="module" src="/static/js/main.js"></script>

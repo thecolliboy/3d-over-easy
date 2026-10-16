@@ -101,8 +101,7 @@ def create_primitive():
         'num_faces': len(result_tris),
     }
 
-    # When a session_id arrives, the new mesh is filed into that session directly;
-    # without one, mint a fresh session so the primitive still lands somewhere (ColliBoy)
+    # File the mesh under the given session, or mint one when none arrives (ColliBoy)
     if session_id:
         store.add_object(session_id, response)
         returned_session_id = session_id

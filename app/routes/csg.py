@@ -32,7 +32,7 @@ def _get_meshes_from_session(session_id: str, obj_ids) -> list:
         obj = store.get_object(session_id, oid)
         vertices = np.array(obj['vertices'], dtype=np.float32).reshape(-1, 3)
 
-        # Non-finite coordinates would poison the manifold kernel, so reject them up front
+        # Reject non-finite vertex data before it reaches the manifold kernel
         if np.any(np.isnan(vertices)) or np.any(np.isinf(vertices)):
             raise ManifoldError(
                 f'Object {oid} has invalid geometry (NaN/Inf vertices). '
@@ -58,7 +58,7 @@ def _merge_vertices(vertices, tri_indices):
     unique_verts, inverse = np.unique(rounded, axis=0, return_inverse=True)
     merged_indices = inverse[tri_indices].astype(np.uint32)
 
-    # Triangles whose corners collapsed onto one vertex are degenerate and get dropped
+    # Drop degenerate triangles (all three corners on a single vertex)
     valid = np.any(
         np.diff(merged_indices, axis=1) != 0,
         axis=1,
@@ -86,7 +86,7 @@ def csg_union():
     if len(obj_ids) < 2:
         return jsonify({'error': 'At least 2 object_ids required for union'}), 400
 
-    # Verify every object exists and its geometry is sound before touching the session
+    # Validate all objects exist with sound geometry first
     try:
         meshes = _get_meshes_from_session(session_id, obj_ids)
     except ValueError as e:
@@ -94,7 +94,7 @@ def csg_union():
     except ManifoldError as e:
         return jsonify({'error': f'Mesh validation failed: {str(e)}'}), 400
 
-    # Record an undo snapshot of the inputs before they are replaced
+    # Snapshot inputs for undo before replacement
     store.push_undo_snapshot(session_id, obj_ids, 'union')
 
     try:
@@ -142,7 +142,7 @@ def csg_subtract():
     data = request.json or {}
     session_id = data.get('session_id')
 
-    # Accept both plural (target_ids/tool_ids) and singular (base_id/tool_id) request shapes
+    # Accept both plural (target_ids/tool_ids) and singular (base_id/tool_id) forms
     if 'target_ids' in data:
         target_ids = data['target_ids']
     elif 'base_id' in data:

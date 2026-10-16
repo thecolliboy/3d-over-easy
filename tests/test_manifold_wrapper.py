@@ -1,6 +1,6 @@
 """Tests for the manifold wrapper geometry engine.
 
-Covers every high-level operation: CSG (union/subtract/intersect), repair,
+Covers every high-level operation: CSG (union/subtract/intersect), solidify,
 hollow, cut, transforms (scale/rotate/translate), simplify, smooth, bounding
 box, mesh stats, and primitive generation.
 """
@@ -14,7 +14,7 @@ from app.engine.manifold_wrapper import (
     union,
     subtract,
     intersect,
-    repair,
+    solidify,
     hollow,
     cut_by_plane,
     scale_mesh,
@@ -37,8 +37,8 @@ from app.engine.manifold_wrapper import (
 def _make_unit_cube() -> tuple:
     """Build a unit cube as (vertices, triangle indices)."""
     v = np.array([
-        [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],   # the four corners of the lower square
-        [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],   # the four corners of the upper square
+        [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],   # lower-face corners
+        [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],   # upper-face corners
     ], dtype=np.float32)
     t = np.array([
         [0, 1, 2], [0, 2, 3],   # two triangles tile the lower square
@@ -59,7 +59,7 @@ def _make_offset_cube(offset: float = 2.5) -> tuple:
 
 def _make_overlapping_cube() -> tuple:
     """Build a unit cube that overlaps the origin cube."""
-    # half-unit shift along every axis leaves a large shared region
+    # half-unit offset on all axes guarantees overlap
     v, t = _make_unit_cube()
     return v + np.array([0.5, 0.5, 0.5], dtype=np.float32), t
 
@@ -78,13 +78,13 @@ class TestUnion:
 
         assert len(vertices) > 0
         assert len(tri_indices) > 0
-        # the merged shape carries at least one cube's worth of triangles
+        # at least one full cube's triangle count remains
         assert len(tri_indices) >= 12
 
     def test_union_adjacent_cubes(self):
         """Merging face-touching cubes keeps both volumes."""
         cube1 = _make_unit_cube()
-        cube2 = _make_offset_cube(offset=1.0)  # offset places the second cube against the first's x face
+        cube2 = _make_offset_cube(offset=1.0)  # unit offset puts the cubes in contact along x
         result = union([cube1, cube2])
         vertices, tri_indices = result
 
@@ -99,7 +99,7 @@ class TestUnion:
         vertices, tri_indices = result
 
         assert len(vertices) > 0
-        # the result must hold both cubes' surfaces
+        # both full cube surfaces remain
         assert len(tri_indices) >= 24
 
     def test_union_three_cubes(self):
@@ -137,7 +137,7 @@ class TestUnion:
         cube2 = _make_overlapping_cube()
         vertices, tri_indices = union([cube1, cube2])
 
-        # every index must land inside the vertex pool
+        # all indices reference existing vertices
         assert np.all(tri_indices < len(vertices))
         assert np.all(tri_indices >= 0)
 
@@ -158,7 +158,7 @@ class TestSubtract:
         vertices, tri_indices = result
 
         assert len(vertices) > 0
-        # the cavity adds surface beyond the plain cube
+        # outer faces survive intact
         assert len(tri_indices) >= 12
 
     def test_subtract_non_overlapping(self):
@@ -178,7 +178,7 @@ class TestSubtract:
         small = create_sphere(radius=0.3)
         large_v, large_t = _make_offset_cube(offset=5.0)
 
-        # removing a disjoint cube cannot alter the sphere
+        # disjoint subtraction leaves the sphere intact
         result = subtract(small, (large_v, large_t))
         vertices, tri_indices = result
         assert len(vertices) > 0
@@ -220,24 +220,24 @@ class TestIntersect:
             intersect([])
 
 
-# repair coverage
+# solidify coverage
 
-class TestRepair:
-    """mesh repair behavior"""
+class TestSolidify:
+    """solidify operation behavior"""
 
-    def test_repair_valid_cube(self):
-        """Repairing a valid cube returns the same surface."""
+    def test_solidify_valid_cube(self):
+        """Solidifying a valid cube returns the same surface."""
         cube = _make_unit_cube()
-        result = repair(*cube)
+        result = solidify(*cube)
         vertices, tri_indices = result
 
         assert len(vertices) > 0
         assert len(tri_indices) >= 12
 
-    def test_repair_returns_valid_mesh(self):
-        """Repaired meshes keep their indices in range."""
+    def test_solidify_returns_valid_mesh(self):
+        """Solidified meshes keep their indices in range."""
         cube = _make_unit_cube()
-        vertices, tri_indices = repair(*cube)
+        vertices, tri_indices = solidify(*cube)
 
         assert np.all(tri_indices < len(vertices))
         assert np.all(tri_indices >= 0)
@@ -310,7 +310,7 @@ class TestCutByPlane:
         cube = _make_unit_cube()
         pieces = cut_by_plane(*cube, normal=(0, 0, 1), origin_offset=-0.5)
 
-        # one side of the plane holds nothing, the other keeps the whole cube
+        # one side can be empty, so accept a single piece
         assert len(pieces) >= 1
 
     def test_cut_far_from_mesh(self):
@@ -482,7 +482,7 @@ class TestSimplifyMesh:
         vertices, tri_indices = result
 
         assert len(vertices) > 0
-        # decimation may only remove triangles, never add them
+        # simplification never adds triangles
         assert len(tri_indices) <= original_count
 
     def test_simplify_cube(self):
@@ -548,7 +548,7 @@ class TestBoundingBox:
 
         _, _, diag = get_bounding_box(v)
 
-        # 9 + 16 + 144 sums to 169, whose root is 13
+        # a 3-4-12 box has a 13-unit diagonal
         assert abs(diag - 13.0) < 1e-4
 
 
@@ -627,7 +627,7 @@ class TestPrimitives:
         v, t = create_sphere(radius=1.0)
 
         assert len(v) > 0
-        # any usable sphere tessellation exceeds this floor
+        # any real sphere mesh has at least twelve triangles
         assert len(t) >= 12
 
     def test_create_sphere_radius(self):
@@ -677,10 +677,10 @@ class TestEdgeCases:
         cube = _make_unit_cube()
         try:
             result = union([cube, (flat_v, flat_t)])
-            # on success the output must still be usable
+            # a successful merge must remain usable
             assert len(result[0]) > 0
         except ManifoldError:
-            pass  # rejection of flat input is equally acceptable
+            pass  # rejecting flat input is acceptable too
 
     def test_scale_zero_factor(self):
         """Zero scaling on one axis flattens that dimension."""
@@ -690,7 +690,7 @@ class TestEdgeCases:
         bbox_min, bbox_max, _ = get_bounding_box(vertices)
         dims = bbox_max - bbox_min
 
-        # the flattened axis measures zero within floating-point tolerance
+        # the flattened axis reads ~0 within float tolerance
         assert abs(dims[1]) < 1e-5
 
     def test_rotate_zero_angle(self):

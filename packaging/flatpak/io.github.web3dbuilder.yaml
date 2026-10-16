@@ -1,0 +1,27 @@
+# Flatpak manifest for web-3d-builder.
+# Built with:  flatpak-builder --user -o io.github.web3dbuilder.flatpak \
+#               packaging/flatpak/io.github.web3dbuilder.yaml
+# Installs the pre-built, self-contained app bundle (tarred by build_linux.sh)
+# into /app and exposes a console launcher; no in-sandbox compilation needed.
+id: io.github.web3dbuilder
+runtime-path: org.freedesktop.Platform/x86_64/24.08
+base: org.freedesktop.Platform
+version: "24.08"
+
+sources:
+  # Assembled app folder, tarred by build_linux.sh into this directory.
+  - type: archive
+    path: web3dbuilder-bundle.tar.xz
+  - type: file
+    path: io.github.web3dbuilder.desktop
+
+finish-args:
+  - --share=network
+  - --device=dri
+  - --socket=fallback-x11        # Lets the app open a browser on a desktop session
+
+build-system: simple
+build-command:
+  # The archive extracts to ./web3dbuilder/ at build time; move it into /app.
+  - "mv web3dbuilder /app/web3dbuilder"
+  - "install -Dm644 io.github.web3dbuilder.desktop /share/applications/io.github.web3dbuilder.desktop"

@@ -11,17 +11,12 @@ export class AxisDrag {
     }
 
     /**
-     * Direct-manipulation dragging: when Move or Rotate mode is active, clicking
-     * and dragging directly on an already-selected shape (rather than grabbing a
-     * gizmo handle) moves or rotates it along a single world axis at a time.
-     *
-     * The axis is picked from the drag direction: after a small deadzone, the
-     * drag is snapped to one of the four cardinal screen directions (up / down /
-     * left / right). Whichever world axis (X, Y, or Z) projects most strongly
-     * onto that screen direction - given the camera's current orientation - is
-     * the axis the object moves or rotates along, and the sign of that projection
-     * determines whether the drag drives it positive or negative along that axis.
-     * That axis stays locked for the remainder of the drag.
+     * Direct-manipulation dragging: in Move or Rotate mode, dragging on an
+     * already-selected shape (not a gizmo handle) moves or rotates it along one
+     * world axis at a time. After a small deadzone the drag snaps to a cardinal
+     * screen direction; the world axis projecting most strongly onto that
+     * direction locks for the rest of the gesture, with its projection's sign
+     * setting the positive/negative drive.
      */
     init() {
         const app = this.app;
@@ -31,17 +26,14 @@ export class AxisDrag {
         const container = ui.viewportContainer;
 
         const DEADZONE_PX = 6;
-        const ROTATE_RAD_PER_PIXEL = 0.004; // about 0.23° per pixel of drag along the locked axis (slowed down from 0.01)
+        const ROTATE_RAD_PER_PIXEL = 0.004; // about 0.23° per pixel of drag along the locked axis (reduced from 0.01)
 
         // Smart snap - magnetic snapping while direct-dragging a shape:
-        // - Move: the selected shape's near/far edge or center snaps into
-        //   alignment with another shape's near/far edge or center once the gap
-        //   is within 1% of the selected shape's size along that axis.
+        // - Move: the selection's near/far edge or center aligns with another
+        //   shape's corresponding feature once within 1% of its size on that axis.
         // - Rotate: snaps to 45° increments once within 5°.
-        // Both use a small extra "resistance" margin (on top of the capture
-        // distance) before releasing a lock, so continuing to drag past a snapped
-        // value takes a little extra push rather than letting go the instant you
-        // cross the line.
+        // Both hold a small resistance margin past capture before releasing, so
+        // dragging through a snap takes an extra push instead of letting go.
         const SMART_SNAP_ROTATE_STEP_DEG = 45;
         const SMART_SNAP_ROTATE_CAPTURE_DEG = 5;
         const SMART_SNAP_ROTATE_RESISTANCE_DEG = 1.5;
@@ -81,10 +73,24 @@ export class AxisDrag {
             const selectedIds = scene.getSelectedObjectIds ? scene.getSelectedObjectIds() : [];
             if (!selectedIds || selectedIds.length === 0) return;
 
-            // Take over the gesture only if the pointer actually landed on an
-            // already-selected shape - not empty space, and not a fresh pick.
+            // If the pointer is over a transform-gizmo handle (axis arrows in
+            // move, rings in rotate), let TransformControls own this gesture -
+            // grabbing an arrow must drag along that exact axis, not trigger our
+            // locked-axis direct drag. The controls' `axis` tracks the last hover
+            // raycast over their handles.
+            const tc = app.transformGizmo ? app.transformGizmo.control : null;
+            if (tc && tc.enabled && tc.axis) return;
+
+            // Take over only if the pointer landed on an already-selected shape -
+            // not empty space, and not a fresh pick. A strict raycast hit wins
+            // outright; otherwise fall back to the selection's enlarged invisible
+            // hitboxes so a selected shape stays grabbable even when mostly
+            // covered by another similarly sized shape.
             const pickedId = scene.pickObject(e.clientX, e.clientY);
-            if (!pickedId || !selectedIds.includes(pickedId)) return;
+            if (!(pickedId && selectedIds.includes(pickedId))) {
+                const nearId = scene.pickSelectedByHitbox ? scene.pickSelectedByHitbox(e.clientX, e.clientY) : null;
+                if (!nearId) return;
+            }
 
             const objs = selectedIds.map(id => scene.objects.get(id)).filter(Boolean);
             if (objs.length === 0) return;
@@ -98,10 +104,9 @@ export class AxisDrag {
                 if (box) box.getCenter(origin); else origin.copy(objs[0].position);
             }
 
-            // For move drags, cache the selection's own bounding box plus the
-            // bounding boxes of every other (unselected) shape in the scene up
-            // front - these don't change over the course of a drag, so
-            // recomputing them on every pointermove would be wasted work.
+            // For move drags, cache the selection's bounding box plus every other
+            // (unselected) shape's box up front - they don't change during a drag,
+            // so recomputing them per pointermove would be wasted work.
             let otherBoxes = null;
             if (mode === 'move') {
                 selectionBox = this._getSelectionBox3(selectedIds);
@@ -112,12 +117,11 @@ export class AxisDrag {
                 });
             }
 
-            // For rotate drags, cache the selection's true world-space bounding-box
-            // center up front (it stays fixed for the whole drag) - this is what
-            // "rotate around center" pivots around. It's generally NOT the same
-            // point as an object's own position/origin: e.g. shapes that rest on
-            // the build plate have their origin at their base, not their visual
-            // center.
+            // For rotate drags, cache the selection's world-space bounding-box
+            // center up front (fixed for the whole drag) - this is what "rotate
+            // around center" pivots around. It is generally NOT an object's own
+            // position/origin: e.g. shapes resting on the build plate have their
+            // origin at their base, not their visual center.
             let rotatePivotCenter = null;
             if (mode === 'rotate') {
                 const box = this._getSelectionBox3(selectedIds);
@@ -167,12 +171,11 @@ export class AxisDrag {
                 // vertical (up/down).
                 const screenAxis = Math.abs(dxTotal) >= Math.abs(dyTotal) ? 'x' : 'y';
 
-                // For move, the shape should track the axis most PARALLEL to the
-                // drag (dragging right slides it along whichever axis reads as
-                // "right" on screen). For rotate, it's the opposite - spinning
-                // something is driven by the axis most PERPENDICULAR to the drag:
-                // dragging left/right spins it around the axis that reads as
-                // "up/down" on screen, like a turntable.
+                // For move, track the axis most PARALLEL to the drag (dragging
+                // right slides along whichever axis reads as "right" on screen).
+                // For rotate it's the opposite - spin is driven by the axis most
+                // PERPENDICULAR to the drag: dragging left/right spins around the
+                // axis that reads as "up/down", like a turntable.
                 const scoreAxis = (drag.mode === 'rotate')
                     ? (screenAxis === 'x' ? 'y' : 'x')
                     : screenAxis;
@@ -224,10 +227,10 @@ export class AxisDrag {
                 });
             } else {
                 // For rotation the axis is perpendicular to the drag, so the drag
-                // itself moves along the *tangent* of that axis's spin - i.e. the
-                // axis's own screen vector rotated 90°. Projecting onto the tangent
-                // (rather than the axis vector itself) is what makes the shape roll
-                // under the cursor the way you'd expect, instead of barely responding.
+                // moves along the *tangent* of that axis's spin - its screen vector
+                // rotated 90°. Projecting onto the tangent (not the axis vector)
+                // makes the shape roll under the cursor as expected instead of
+                // barely responding.
                 const tangent = { x: -v.y, y: v.x };
                 const dot = dxTotal * tangent.x + dyTotal * tangent.y;
                 const pixelsAlongTangent = dot / Math.sqrt(lenSq);
@@ -305,13 +308,11 @@ export class AxisDrag {
     }
 
     /**
-     * Smart-snap for move drags: align the selected shape's near edge, far
-     * edge, or center - along the locked drag axis - with a neighbor's
-     * corresponding feature. Capture engages once the gap falls within 1% of
-     * the selection's own extent on that axis (a 500 mm-wide shape captures
-     * within 5 mm); after locking, release requires drifting back out past
-     * the capture distance plus a small resistance margin, tracked through
-     * _snapWithHysteresis via drag.snapState.
+     * Smart-snap for move drags: align the selection's near edge, far edge, or
+     * center - along the locked axis - with a neighbor's corresponding feature.
+     * Capture engages once within 1% of the selection's extent on that axis;
+     * release requires drifting past capture plus a small resistance margin,
+     * tracked through _snapWithHysteresis via drag.snapState.
      */
     _snapMoveToNeighbors(amount, drag) {
         const axis = drag.worldAxis;
@@ -325,13 +326,12 @@ export class AxisDrag {
         if (!(extent > 0)) return amount;
 
         const capture = extent * 0.01; // capture radius: 1% of the selection's extent on this axis (ColliBoy)
-        const resistance = capture * 0.5; // hysteresis margin - a little extra push is needed to break the lock
+        const resistance = capture * 0.5; // hysteresis margin - extra push needed to break the lock
 
-        // All alignments the selection could reach with a neighbor along this
-        // axis: far edge to near edge, near edge to far edge, or center to
-        // center. Each candidate is stored as the translation `amount` that
-        // would achieve it, so candidates compare directly against the raw
-        // drag amount.
+        // All alignments reachable with a neighbor along this axis: far edge to
+        // near edge, near edge to far edge, or center to center. Each candidate
+        // is stored as the translation `amount` that achieves it, so candidates
+        // compare directly against the raw drag amount.
         const candidates = [];
         for (const otherBox of drag.otherBoxes) {
             const oMin = otherBox.min[axis];
@@ -371,18 +371,13 @@ export class AxisDrag {
     }
 
     /**
-     * Snap `raw` to the nearest multiple of `step`, but only once it comes
-     * within `capture` distance of that multiple - and, once snapped, require
-     * the raw value to drift `capture + resistance` away before releasing.
-     * That extra `resistance` margin is what makes the snap feel "sticky":
-     * keeping a drag past the snapped value takes a little harder push than
-     * the capture radius alone would demand before the shape breaks free and
-     * tracks the cursor freely again.
+     * Snap `raw` to the nearest multiple of `step` once within `capture`, and,
+     * once snapped, require drifting `capture + resistance` away before releasing.
+     * The extra `resistance` margin is what makes the snap feel "sticky": holding
+     * past a snapped value takes a harder push than capture alone would demand.
      *
-     * `state` is a small per-drag object ({ snappedTo: null }) that persists
-     * across pointermove events for one drag gesture, so the lock/release
-     * decision has memory instead of being recomputed from scratch on every
-     * mouse move.
+     * `state` ({ snappedTo: null }) persists across pointermove events for one
+     * drag gesture, so lock/release has memory instead of recomputing each move.
      */
     _snapWithHysteresis(raw, step, capture, resistance, state) {
         if (state.snappedTo !== null) {
@@ -544,10 +539,9 @@ export class AxisDrag {
         }
 
         window.dispatchEvent(new Event('transform-update'));
-        // A value-bar entry is a discrete, committed edit - not a live drag -
-        // so commit it to the backend immediately, exactly as a gizmo drag's
-        // end would, rather than waiting for some other transform to happen
-        // first.
+        // A value-bar entry is a discrete, committed edit - not a live drag - so
+        // commit it to the backend immediately, as a gizmo drag's end would,
+        // rather than waiting for another transform first.
         window.dispatchEvent(new Event('transform-end'));
         this._refreshTransformPanel();
     }

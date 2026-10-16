@@ -96,10 +96,9 @@ export class CuttingPlane {
         this._updateNormalArrow();
     }
 
-    // PlaneGeometry's local normal is +Z; these rotations map that canonical
-    // normal onto the intended world-space direction for each preset axis,
-    // which is what keeps getNormal() correct both at the presets and after
-    // free rotation during Split mode.
+    // PlaneGeometry's local normal is +Z; these rotations map it onto each
+    // preset axis's world direction, keeping getNormal() correct at the presets
+    // and after free rotation in Split mode.
     _orientToAxis() {
         switch (this.axis) {
             case 'x':
@@ -115,8 +114,8 @@ export class CuttingPlane {
     }
 
     _updateNormalArrow() {
-        // The arrow rides as a child of planeMesh and inherits its rotation;
-        // its local direction/position only need setting once.
+        // The arrow is a child of planeMesh and inherits its rotation, so only
+        // its local direction and position are set here.
         this.normalArrow.setDirection(new THREE.Vector3(0, 0, 1));
         this.normalArrow.position.set(0, 0, 0);
     }
@@ -139,13 +138,11 @@ export class CuttingPlane {
     }
 
     /**
-     * Rotate by `angleRad` around a fixed WORLD axis ('x'|'y'|'z'), composed
-     * on top of `fromQuaternion` (defaults to the mesh's current orientation).
-     * Do not write `planeMesh.rotation[axis]` directly - Euler components only
-     * equal independent world-axis rotations while the other two are zero,
-     * which breaks once the plane carries any existing rotation. Quaternion
-     * pre-multiplication keeps "rotate about a world axis" well-defined at
-     * any orientation.
+     * Rotate by `angleRad` around a fixed WORLD axis ('x'|'y'|'z'), composed on
+     * top of `fromQuaternion` (defaults to the mesh's current orientation).
+     * Uses quaternion pre-multiplication instead of writing
+     * `planeMesh.rotation[axis]`, since Euler components only equal independent
+     * world-axis rotations while the other two are zero.
      */
     rotateAroundWorldAxis(axis, angleRad, fromQuaternion = null) {
         const axisVec = new THREE.Vector3();
@@ -171,10 +168,9 @@ export class CuttingPlane {
     showPreview(pieceA, pieceB) {
         this.hidePreview();
 
-        // Colors are keyed by piece index (first half blue, second orange)
-        // rather than identity against an already-added child mesh - `data`
-        // is a raw server object and can never === a THREE.Mesh, so that test
-        // was always false.
+        // Colors key off the piece index (first half blue, second orange);
+        // `data` is a raw server object, so it can never be identity-matched
+        // against an existing child mesh.
         if (pieceA) {
             const mesh = this._createPreviewMesh(pieceA, 0x44aaff);
             if (mesh) this.previewGroup.add(mesh);
@@ -273,7 +269,7 @@ export class CuttingPlane {
         this.planeMesh.material.dispose();
         this.edgeLines.geometry.dispose();
         this.edgeLines.material.dispose();
-        // the X/Z guides share one LineDashedMaterial instance - dispose it once
+        // The X/Z guides share one LineDashedMaterial instance - dispose it once
         this.xAxisLine.geometry.dispose();
         this.zAxisLine.geometry.dispose();
         this.xAxisLine.material.dispose();

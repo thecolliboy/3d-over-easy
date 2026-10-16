@@ -1,6 +1,6 @@
 """Import and export endpoints for session meshes.
 
-Covers file uploads in any supported format (stl, obj, ply, glb, gltf, 3mf, fbx)
+Covers file uploads in any supported format (stl, obj, ply, glb, gltf, 3mf)
 and single-object, combined, or preset-driven exports back to disk formats.
 """
 # ColliBoy
@@ -13,7 +13,7 @@ from app.parsers.stl_parser import write_stl
 from app.parsers.obj_parser import write_obj as _write_obj
 from app.parsers.ply_parser import write_ply as _write_ply
 from app.parsers._3mf_parser import write_3mf as _write_3mf
-from app.parsers.unified_parser import detect_format, parse_mesh
+from app.parsers.unified_parser import detect_format, parse_mesh, parse_3mf_meshes
 from app.models.session import store
 
 bp = Blueprint('import_export', __name__)
@@ -75,8 +75,8 @@ def export_preset():
 
 
 def _export_print_ready(objects):
-    """Run manifold repair over every mesh, then merge them into one binary STL ready for slicing."""
-    from app.engine.manifold_wrapper import repair
+    """Run the solidify pass over every mesh, then merge them into one binary STL ready for slicing."""
+    from app.engine.manifold_wrapper import solidify
 
     all_vertices = []
     all_indices = []
@@ -101,16 +101,16 @@ def _export_print_ready(objects):
             idxs_arr = np.arange(len(verts_arr), dtype=np.uint32).reshape(-1, 3)
 
         try:
-            repaired_verts, repaired_idxs = repair(verts_arr, idxs_arr)
+            solidified_verts, solidified_idxs = solidify(verts_arr, idxs_arr)
         except Exception as e:
-            # Fall back to the unrepaired mesh when the repair pass raises
-            repaired_verts = verts_arr
-            repaired_idxs = idxs_arr
+            # Fall back to the original mesh when the solidify pass raises
+            solidified_verts = verts_arr
+            solidified_idxs = idxs_arr
 
-        all_vertices.append(np.asarray(repaired_verts, dtype=np.float32).reshape(-1, 3))
+        all_vertices.append(np.asarray(solidified_verts, dtype=np.float32).reshape(-1, 3))
         # Rebase this mesh's index set past every earlier mesh so the merged STL stays valid (ColliBoy)
-        all_indices.append((np.asarray(repaired_idxs, dtype=np.uint32).reshape(-1, 3) + offset))
-        offset += np.asarray(repaired_verts).reshape(-1, 3).shape[0]
+        all_indices.append((np.asarray(solidified_idxs, dtype=np.uint32).reshape(-1, 3) + offset))
+        offset += np.asarray(solidified_verts).reshape(-1, 3).shape[0]
 
     vertices_array = np.concatenate(all_vertices, axis=0) if all_vertices else np.empty((0, 3), dtype=np.float32)
     indices_array = np.concatenate(all_indices, axis=0) if all_indices else None
@@ -127,7 +127,10 @@ def _export_print_ready(objects):
 
 
 def _export_3mf(objects):
-    """Pack every session object into one 3MF archive, keeping colors and metadata intact."""
+    """Pack every session object into one 3MF archive, keeping colors and metadata intact.
+
+    Each object stays its own mesh; per-object transforms ride on the build item
+    rather than being baked into the vertex coordinates."""
     meshes = []
     for obj in objects:
         mesh_data = {
@@ -137,6 +140,8 @@ def _export_3mf(objects):
         }
         if obj.get('colors'):
             mesh_data['colors'] = obj['colors']
+        if obj.get('transform') is not None:
+            mesh_data['transform'] = obj['transform']
         meshes.append(mesh_data)
 
     filename = f'{objects[0].get("name", "model")}.3mf'
@@ -211,38 +216,46 @@ def import_files():
         if not fmt:
             return jsonify({
                 'error': f'Unsupported format: {filename}',
-                'supported': ['stl', 'obj', 'ply', 'glb', 'gltf', '3mf', 'fbx']
+                'supported': ['stl', 'obj', 'ply', 'glb', 'gltf', '3mf']
             }), 400
 
         try:
-            mesh_data = parse_mesh(filename, file_data)
+            if fmt == '3mf':
+                # Each 3MF object becomes a separate session object so multi-model files
+                # round-trip unmerged, with positional data baked into each object's vertices
+                mesh_list = parse_3mf_meshes(file_data)
+            else:
+                mesh_list = [parse_mesh(filename, file_data)]
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         except Exception as e:
             return jsonify({'error': f'Failed to parse {filename}: {str(e)}'}), 400
 
-        obj_id = str(uuid.uuid4())[:8]
-        obj = store.add_object(actual_session_id, {
-            'id': obj_id,
-            'name': filename,
-            'format': fmt,
-            'vertices': mesh_data['vertices'],
-            'indices': mesh_data['indices'],
-            'normals': mesh_data['normals'],
-            'num_vertices': mesh_data['num_vertices'],
-            'num_faces': mesh_data['num_faces'],
-        })
+        stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+        for idx, mesh_data in enumerate(mesh_list):
+            obj_id = str(uuid.uuid4())[:8]
+            name = filename if len(mesh_list) == 1 else f'{stem}_{idx + 1}'
+            obj = store.add_object(actual_session_id, {
+                'id': obj_id,
+                'name': name,
+                'format': fmt,
+                'vertices': mesh_data['vertices'],
+                'indices': mesh_data['indices'],
+                'normals': mesh_data.get('normals'),
+                'num_vertices': mesh_data['num_vertices'],
+                'num_faces': mesh_data['num_faces'],
+            })
 
-        results.append({
-            'id': obj['id'],
-            'name': obj['name'],
-            'format': obj['format'],
-            'vertices': obj['vertices'],
-            'indices': obj['indices'],
-            'normals': obj['normals'],
-            'num_vertices': obj['num_vertices'],
-            'num_faces': obj['num_faces'],
-        })
+            results.append({
+                'id': obj['id'],
+                'name': obj['name'],
+                'format': obj['format'],
+                'vertices': obj['vertices'],
+                'indices': obj['indices'],
+                'normals': obj['normals'],
+                'num_vertices': obj['num_vertices'],
+                'num_faces': obj['num_faces'],
+            })
 
     return jsonify({
         'objects': results,
@@ -280,10 +293,12 @@ def export_model():
             return _export_obj(obj)
         elif fmt == 'ply':
             return _export_ply(obj)
+        elif fmt == '3mf':
+            return _export_3mf([obj])
         else:
             return jsonify({
                 'error': f'Format \".{fmt}\" not yet supported for export.',
-                'supported': ['stl', 'obj', 'ply']
+                'supported': ['stl', 'obj', 'ply', '3mf']
             }), 400
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
@@ -308,10 +323,46 @@ def export_all():
             return _export_obj_combined(objects)
         elif fmt == 'ply':
             return _export_ply_combined(objects)
+        elif fmt == '3mf':
+            # 3MF keeps every object as its own mesh in one archive - no merging needed
+            return _export_3mf(objects)
         else:
             return jsonify({
                 'error': f'Combined export for \".{fmt}\" not yet supported.',
-                'supported': ['stl', 'obj', 'ply']
+                'supported': ['stl', 'obj', 'ply', '3mf']
+            }), 400
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@bp.route('/export/scene', methods=['POST'])
+def export_scene():
+    """Save the whole scene from client-supplied meshes.
+
+    Each object carries its current transform, baked into vertex data for single-mesh
+    formats or kept as a per-mesh matrix in 3MF; this sidesteps the per-object backend
+    sessions that /export/all is limited to."""
+    data = request.json or {}
+    fmt = (data.get('format') or 'stl').lower()
+    meshes = data.get('meshes') or []
+
+    if not meshes:
+        return jsonify({'error': 'No meshes provided'}), 400
+
+    try:
+        if fmt == 'stl':
+            return _export_stl_combined(meshes)
+        elif fmt == 'obj':
+            return _export_obj_combined(meshes)
+        elif fmt == 'ply':
+            return _export_ply_combined(meshes)
+        elif fmt == '3mf':
+            # 3MF keeps every object as its own mesh in one archive - no merging needed
+            return _export_3mf(meshes)
+        else:
+            return jsonify({
+                'error': f'Format \".{fmt}\" not supported for scene export.',
+                'supported': ['stl', 'obj', 'ply', '3mf']
             }), 400
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
@@ -355,9 +406,8 @@ def _export_stl_combined(objects):
         if idxs is not None and len(idxs) > 0:
             all_indices.extend(i + offset for i in idxs)
         else:
-            # No index data (e.g. STL imports): emit explicit triangle indices so the
-            # geometry survives the merge - write_stl only expands indexed triangles,
-            # so a bare soup would be dropped once any sibling object is indexed (ColliBoy)
+            # No index data (e.g. STL imports): emit explicit triangle indices since write_stl
+            # only expands indexed triangles and would drop a bare soup during the merge (ColliBoy)
             all_indices.extend(range(offset, offset + vert_count))
         all_vertices.extend(verts)
         # advance for every object so later index sets rebase past unindexed geometry too (ColliBoy)

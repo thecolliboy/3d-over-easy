@@ -27,11 +27,8 @@ def timeout_operation(seconds: int = 30):
     """Wrap a function so it aborts with MeshProcessingTimeout when it runs long.
 
     A daemon thread watches the call; Python cannot kill a running thread, so on
-    expiry the wrapper raises instead of waiting for the work to finish.
-
-    Applied above a definition with that budget, it yields a wrapper that passes
-    results through unchanged and raises MeshProcessingTimeout once the budget
-    elapses.
+    expiry the wrapper raises instead of waiting for the work to finish. Results
+    pass through unchanged otherwise.
     """
     def decorator(func):
         @functools.wraps(func)
@@ -56,7 +53,7 @@ def timeout_operation(seconds: int = 30):
             thread.start()
             finished.wait(timeout=seconds)
 
-            # The worker thread keeps running in the background; we only stop waiting on it (ColliBoy)
+            # Worker thread keeps running in the background; we just stop waiting (ColliBoy)
             if not finished.is_set():
                 raise MeshProcessingTimeout(
                     f'Mesh processing timed out after {seconds}s - '

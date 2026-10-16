@@ -13,8 +13,8 @@ bp = Blueprint('objects', __name__)
 def duplicate_object():
     """Clone an object within its session; the frontend uses this for paste operations.
 
-    Body: { session_id, object_id }. The response carries the clone's full mesh data
-    and id in the same shape returned by the csg, primitives, and geometry routes.
+    Body: { session_id, object_id }. Response: the clone's full mesh data and id, in
+    the same shape returned by the csg/primitives/geometry routes.
     """
     data = request.json or {}
     session_id = data.get('session_id')
@@ -27,14 +27,13 @@ def duplicate_object():
     if not src:
         return jsonify({'error': f'Object {object_id} not found'}), 404
 
-    # get_object() hands back the live dict rather than a copy; deep-copying first
-    # keeps the clone from aliasing - and later mutating - the source object's
-    # vertex, index, normal, and color lists.
+    # get_object() returns the live dict, not a copy; deepcopy first so the clone
+    # does not alias or mutate the source's vertex/index/normal/color lists.
     new_obj = copy.deepcopy(src)
 
-    # add_object() mints a new id only when the incoming dict has none; the deepcopy
-    # still carries the source's id, so overwrite it explicitly here - otherwise the
-    # original object would be replaced in place rather than duplicated (ColliBoy)
+    # add_object() mints an id only if the dict has none; the deepcopy still
+    # carries the source's id, so overwrite it explicitly - otherwise the original
+    # object is replaced in place instead of duplicated (ColliBoy)
     new_obj['id'] = str(uuid.uuid4())[:8]
 
     store.add_object(session_id, new_obj)

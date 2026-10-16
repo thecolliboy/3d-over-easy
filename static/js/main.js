@@ -11,9 +11,12 @@ import { GridSnapper } from './viewport/GridSnapper.js';
 import { WebGLOptimizer } from './viewport/WebGLOptimizer.js';
 import { SplitMode } from './viewport/SplitMode.js';
 import { AxisDrag } from './viewport/AxisDrag.js';
+import { ArrowKeys } from './viewport/ArrowKeys.js';
+import { ViewCube } from './viewport/ViewCube.js';
 import { MeshSync } from './viewport/MeshSync.js';
 import { ContextMenu } from './ui/ContextMenu.js';
 import { ObjectListPanel } from './ui/ObjectListPanel.js';
+import { RightPanel } from './ui/RightPanel.js';
 import { PrimitivePalette } from './ui/PrimitivePalette.js';
 import { UIManager, AI_OPENAI_ADD_OPTION } from './ui/UIManager.js';
 import {
@@ -36,6 +39,7 @@ class App {
         const buildPlateDefaults = defaults.build_plate || {};
         const snapDefaults = defaults.snap || {};
         const uiDefaults = defaults.ui || {};
+        const importDefaults = defaults.import || {};
 
         // Raw .config sections from /api/settings; _initViewport reads the ones
         // App doesn't keep as fields (viewport, snap)
@@ -65,6 +69,23 @@ class App {
         // Even lighting - flattens the viewport's light rig so all surfaces
         // are lit about equally; toggled from the bottom-left view-mode cluster.
         this.evenLightingEnabled = uiDefaults.even_lighting ?? false;
+
+        // Tip mode - a persistent box (top-right) describing whichever button is
+        // hovered over; seeded from .config (ui.tip_mode), off by default, and
+        // toggled from the status-bar switch.
+        this.tipModeEnabled = uiDefaults.tip_mode ?? false;
+
+        // View cube - orientation indicator docked at the top-left of the viewport;
+        // seeded from .config (ui.view_cube_visible), on by default, and toggled
+        // from the status-bar switch. Always hidden while aesthetic mode is active.
+        this.viewCubeEnabled = uiDefaults.view_cube_visible ?? true;
+
+        // Import separation - freshly imported shapes are shifted along X/Z until
+        // their bounding box sits at least importMinGapMm clear of every existing
+        // shape's bounding box. Driven by .config ([import] separation_enabled /
+        // min_gap_mm).
+        this.importSeparationEnabled = importDefaults.separation_enabled ?? true;
+        this.importMinGapMm = importDefaults.min_gap_mm ?? 5.0;
 
         // Visual state for the build plate and axes, seeded from .config
         this.buildPlateVisible = buildPlateDefaults.visible ?? true;
@@ -110,34 +131,39 @@ class App {
         this.primitivePalette = new PrimitivePalette();
         this.splitMode = new SplitMode(this);
         this.axisDrag = new AxisDrag(this);
+        this.arrowKeys = new ArrowKeys(this);
         this.objectListPanel = new ObjectListPanel(this);
+        this.rightPanel = new RightPanel(this);
         this.meshSync = new MeshSync(this);
 
         this._initViewport();
         this._applyInitialSettings();
         this._bindUIEvents();
         this.axisDrag.init();
+        this.arrowKeys.init();
+
+        // Orientation indicator in the top-left corner of the viewport; its
+        // seeded visibility (and button state) come from .config. Aesthetic mode,
+        // if seeded on above, hides it via CSS regardless of this switch.
+        this.viewCube = new ViewCube(this);
+        this._setViewCubeEnabled(this.viewCubeEnabled);
         this.splitMode.init();
+        this.rightPanel.init();
         this._initConnectionStatus();
         this._initAdBanner();
     }
 
     /**
-     * Drives the ad banner at the bottom of the right-hand menu. The host is
-     * probed with a lightweight fetch on the same cadence as the connection
-     * dot; no-cors mode means we only care whether the network path answers,
-     * not what comes back - so the probe works without CORS headers. While
-     * the host is unreachable the banner container is hidden, which removes
-     * its space from the menu layout; once a probe succeeds again the space
-     * is restored and the iframe resumes on its own.
+     * Drives the About section (the ColliBoy ad iframe) at the bottom of the
+     * right-hand menu: probes the host with a no-cors fetch so it works without
+     * CORS headers, and hides the whole section while the host is unreachable.
      */
     _initAdBanner() {
-        const banner = document.getElementById('ad-banner');
-        if (!banner) return;
+        if (!document.querySelector('[data-panel-section="about"]')) return;
 
         const BANNER_URL = 'https://ads.colliboy.com';
         const CHECK_INTERVAL_MS = 20000;
-        let hidden = false;
+        let lastReachable = null; // unknown until the first probe lands
 
         const check = async () => {
             const controller = new AbortController();
@@ -152,9 +178,9 @@ class App {
                 clearTimeout(timer);
             }
 
-            if (reachable === hidden) return; // state unchanged - nothing to do
-            hidden = !reachable;
-            banner.style.display = hidden ? 'none' : '';
+            if (reachable === lastReachable) return; // state unchanged - nothing to do
+            lastReachable = reachable;
+            this.rightPanel.setAboutAvailable(reachable);
         };
 
         check();
@@ -169,10 +195,8 @@ class App {
     }
 
     /**
-     * Drives the connection indicator - the leftmost dot in the status bar.
-     * The health check runs sparingly: every 20s, and only while the tab is
-     * visible, so the server isn't hammered. It also re-runs immediately when
-     * the tab regains focus, keeping the dot from sitting stale.
+     * Drives the connection indicator - the leftmost dot in the status bar;
+     * checks health every 20s while the tab is visible and on refocus.
      */
     _initConnectionStatus() {
         const dot = this.ui.elements['connection-status'];
@@ -205,11 +229,9 @@ class App {
     }
 
     /**
-     * Themed stand-in for the browser's native alert(): a modal matching the
-     * app's own dialog styling rather than a generic "localhost says" popup.
-     * Dismissable via OK, the close button, clicking outside, or Escape/Enter.
-     * Every call site is fire-and-forget - none of them depend on dismissal -
-     * so callers don't need to await this promise.
+     * Themed stand-in for alert(): a modal matching the app's dialog styling;
+     * dismiss via OK, close button, outside click, or Escape/Enter. Fire-and-
+     * forget - callers need not await it.
      */
     _showAlert(message, title = 'Notice') {
         return new Promise((resolve) => {
@@ -279,12 +301,9 @@ class App {
     }
 
     /**
-     * Save flow shared by Ctrl-S and the menu "Save" item. Opens the Save dialog
-     * (preset chips plus format selection), then saves the entire scene in one
-     * file - unlike Export, it never narrows to the selected shape. Presets are
-     * sent without an object id so the backend targets the whole session; raw
-     * formats go through the combined /export/all endpoint, which merges every
-     * shape into a single file.
+     * Save flow shared by Ctrl-S and the menu "Save" item: opens the Save dialog,
+     * then saves the entire scene in one file (never just the selection), shipping
+     * every object at its on-screen position to /api/export/scene.
      */
     async _saveScene() {
         if (this.sceneController.objects.size === 0) {
@@ -300,17 +319,18 @@ class App {
 
             this.ui.showLoading('Saving...');
 
-            if (config.preset) {
-                // Whole-session preset export: no object id means the backend
-                // targets every shape in the session.
-                blob = await this.api.exportPreset(config.preset, this.sessionId);
-                const ext = config.preset === '3mf' ? '3mf' : (config.preset === 'obj-texture' ? 'obj' : 'stl');
-                downloadName = `project.${ext}`;
-            } else {
-                const format = (config.format || 'stl').toLowerCase();
-                blob = await this.api.exportAll(format, this.sessionId);
-                downloadName = `project.${format}`;
+            const format = (config.format || 'stl').toLowerCase();
+
+            // Merge-based formats bake every model into one body, so the scene must
+            // be all-solid first - open/hollow shapes would print as broken shells.
+            if (format !== '3mf' && this._warnIfNotSolid(
+                [...this.sceneController.objects.keys()], 'save', 'the shapes in the scene'
+            )) {
+                return;
             }
+
+            blob = await this.api.exportScene(format, this._buildWorldSpaceMeshes(format));
+            downloadName = `project.${format}`;
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -327,16 +347,91 @@ class App {
     }
 
     /**
-     * Guard for Split/Merge/Subtract/Intersect: warns and returns true if any
-     * of the given objects is marked not solid (open surface / holes - the
-     * same condition shown as "Solid: No" in the properties panel). These ops
-     * need watertight input, so the alert points toward the Solid tool rather
-     * than letting the backend call fail opaquely. A missing/undefined
-     * userData.isSolid counts as solid (untested objects - primitives, CSG
-     * results, pasted copies - are assumed fine), matching the default used
-     * when displaying the property.
+     * Snapshot every visible object as a mesh descriptor for saving: 3MF ships local-space
+     * geometry plus a per-mesh world transform (models stay separate); other formats bake
+     * position/rotation/scale into the vertices. Uses each top-level mesh's own geometry -
+     * LOD children are display approximations and must not replace the real model.
      */
-    _warnIfNotSolid(ids, opLabel) {
+    _buildWorldSpaceMeshes(format) {
+        const keepSeparate = String(format || '').toLowerCase() === '3mf';
+        const meshes = [];
+
+        for (const [id, obj] of this.sceneController.objects) {
+            // Every registered object is a Mesh; fall back to its first mesh child
+            // if one ever gets wrapped in a group.
+            let source = null;
+            if (obj.isMesh && obj.geometry) {
+                source = obj;
+            } else {
+                obj.traverse((child) => {
+                    if (!source && child.isMesh && child.geometry) source = child;
+                });
+            }
+            if (!source || !source.geometry.getAttribute('position')) continue;
+
+            source.updateMatrixWorld(true);
+            const matrix = source.matrixWorld;
+            const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+            const posAttr = source.geometry.getAttribute('position');
+            const index = source.geometry.getIndex();
+            const normalAttr = source.geometry.getAttribute('normal');
+            const colorAttr = source.geometry.getAttribute('color');
+
+            const vertices = [];
+            if (keepSeparate) {
+                // local-space coordinates; the item transform carries the placement
+                for (let i = 0; i < posAttr.count; i++) {
+                    vertices.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+                }
+            } else {
+                const v = new THREE.Vector3();
+                for (let i = 0; i < posAttr.count; i++) {
+                    v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(matrix);
+                    vertices.push(v.x, v.y, v.z);
+                }
+            }
+
+            const mesh = { name: obj.name || id, vertices };
+            if (keepSeparate) mesh.transform = matrix.elements.slice();
+
+            if (index) mesh.indices = Array.from(index.array);
+
+            if (normalAttr && normalAttr.count === posAttr.count) {
+                const normals = [];
+                for (let i = 0; i < normalAttr.count; i++) {
+                    if (keepSeparate) {
+                        // local-space normals; the item transform applies to them too
+                        normals.push(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i));
+                    } else {
+                        const n = new THREE.Vector3();
+                        n.set(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i))
+                            .applyMatrix3(normalMatrix).normalize();
+                        normals.push(n.x, n.y, n.z);
+                    }
+                }
+                mesh.normals = normals;
+            }
+
+            if (colorAttr && colorAttr.count === posAttr.count) {
+                const colors = [];
+                for (let i = 0; i < colorAttr.count; i++) {
+                    colors.push(colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i));
+                }
+                mesh.colors = colors;
+            }
+
+            meshes.push(mesh);
+        }
+
+        return meshes;
+    }
+
+    /**
+     * Guard for boolean ops and whole-scene saves: warns (returns true) if any given
+     * object is marked not solid - open surface/holes, as shown by "Solid: No". Missing
+     * userData.isSolid counts as solid. `scope` phrases which shapes are being checked.
+     */
+    _warnIfNotSolid(ids, opLabel, scope = 'the selected shapes') {
         const scene = this.sceneController;
         const notSolidIds = ids.filter((id) => {
             const obj = scene.objects.get(id);
@@ -346,7 +441,7 @@ class App {
 
         const plural = notSolidIds.length > 1;
         this._showAlert(
-            `${plural ? `${notSolidIds.length} of the selected shapes are` : 'One of the selected shapes is'} ` +
+            `${plural ? `${notSolidIds.length} of ${scope} are` : `One of ${scope} is`} ` +
             `not solid (open surface / holes in the mesh). Use the Solid tool to repair ` +
             `${plural ? 'them' : 'it'} before you ${opLabel}.`,
             'Solid Shape Required'
@@ -376,9 +471,16 @@ class App {
         this.webglOptimizer = new WebGLOptimizer(this.sceneController);
         this.sceneController.setOptimizer(this.webglOptimizer);
 
-        this.transformGizmo = new TransformGizmo(this.sceneController.camera, canvas);
+        this.transformGizmo = new TransformGizmo(this.sceneController.camera, canvas, this.sceneController.scene);
         if (this.transformGizmo.setPivotMode) this.transformGizmo.setPivotMode(this._rotatePivotMode);
         if (this.transformGizmo.setRatioLock) this.transformGizmo.setRatioLock(this._lockRatioEnabled);
+
+        // While a gizmo handle is being dragged, OrbitControls must not also
+        // rotate the camera from the same pointer gesture - disable it for the
+        // duration of every gizmo drag.
+        this.transformGizmo.control.addEventListener('dragging-changed', (event) => {
+            this.sceneController.controls.enabled = !event.value;
+        });
         this.cuttingPlane = new CuttingPlane(this.sceneController.scene);
         this.gridSnapper = new GridSnapper(this.sceneController.scene, {
             enabled: snapDefaults.grid_enabled ?? false,
@@ -479,6 +581,330 @@ class App {
 
         // Rotate-pivot checkbox tracks the initial pivot mode
         if (ui.chkRotatePivotCenter) ui.chkRotatePivotCenter.checked = this._rotatePivotMode === 'center';
+
+        // Tip mode - apply its seeded state (shows/hides the box and starts/stops hover tracking).
+        this._setTipMode(this.tipModeEnabled);
+    }
+
+    /**
+     * Sets tip mode on/off. When on, a persistent box at the top-right of the
+     * viewport shows the description of whichever button is hovered; when off it
+     * hides and detaches its hover tracking. Seeded from .config (ui.tip_mode),
+     * toggled from the status-bar switch.
+     */
+    _setTipMode(enabled) {
+        this.tipModeEnabled = !!enabled;
+        const btn = this.ui.btnTipMode;
+        if (btn) btn.classList.toggle('active', this.tipModeEnabled);
+
+        if (this.tipModeEnabled) {
+            this._enableTipTracking();
+        } else {
+            this._disableTipTracking();
+        }
+    }
+
+    /**
+     * Sets the orientation indicator on/off. Seeded from .config (ui.view_cube_visible),
+     * toggled from the status-bar switch. Aesthetic mode hides it independently via CSS
+     * (body.aesthetic-mode .view-cube), so this only tracks the user's own preference.
+     */
+    _setViewCubeEnabled(enabled) {
+        this.viewCubeEnabled = !!enabled;
+        const btn = this.ui.btnViewCube;
+        if (btn) btn.classList.toggle('active', this.viewCubeEnabled);
+        if (this.viewCube) this.viewCube.setVisible(this.viewCubeEnabled);
+    }
+
+    /**
+     * Shows the tip box and starts tracking button hovers. The box keeps the
+     * last-hovered button's description on screen (persistent), starting from a
+     * placeholder until the first hover lands.
+     */
+    _enableTipTracking() {
+        const box = this.ui.tipBox;
+        if (!box) return;
+
+        box.classList.remove('hidden');
+        this._setTipPlaceholder();
+
+        if (this._tipMouseOverHandler) return; // already tracking
+        this._tipMouseOverHandler = (e) => {
+            const target = e.target;
+            const btn = (target && typeof target.closest === 'function') ? target.closest('button') : null;
+            if (!btn) return;
+            this._showTipFor(btn);
+        };
+        document.addEventListener('mouseover', this._tipMouseOverHandler);
+    }
+
+    /** Hides the tip box and stops tracking button hovers. */
+    _disableTipTracking() {
+        const box = this.ui.tipBox;
+        if (box) box.classList.add('hidden');
+
+        if (this._tipMouseOverHandler) {
+            document.removeEventListener('mouseover', this._tipMouseOverHandler);
+            this._tipMouseOverHandler = null;
+        }
+    }
+
+    /** Default content shown before any button has been hovered yet. */
+    _setTipPlaceholder() {
+        if (!this.ui.tipBoxTitle || !this.ui.tipBoxDesc) return;
+        this.ui.tipBoxTitle.textContent = 'Tips';
+        this.ui.tipBoxDesc.textContent = 'Hover over any button to see what it does.';
+    }
+
+    /**
+     * Fills the tip box from a hovered element. The description comes from its
+     * title attribute (the richest source, present on most buttons); the heading
+     * is the visible label, or the short form of the title for icon-only buttons.
+     */
+    _showTipFor(el) {
+        if (!this.ui.tipBoxTitle || !this.ui.tipBoxDesc) return;
+
+        const label = (el.textContent || '').trim();
+        const title = el.getAttribute('title') || '';
+
+        let heading = label;
+        if (!heading && title) {
+            // Icon-only button: use the part of the title before " - " as its name.
+            const dashIdx = title.indexOf(' - ');
+            heading = (dashIdx > 0 ? title.slice(0, dashIdx) : title).trim();
+        }
+
+        const desc = title || 'No description available.';
+
+        // Avoid a redundant heading that just repeats the description verbatim.
+        this.ui.tipBoxTitle.textContent =
+            (heading && heading.toLowerCase() !== desc.toLowerCase()) ? heading : '';
+        this.ui.tipBoxDesc.textContent = desc;
+    }
+
+    /**
+     * Opens the .config editor popup. Fetches every setting from /api/config,
+     * renders one editable field per key grouped by section, and lets the user
+     * Save (POSTs back to /api/config) or Cancel. On save, the purely-frontend
+     * ui.* values are re-applied to the live session so they take effect right
+     * away; everything else persists to .config and applies on next load.
+     */
+    async _showSettingsPopup() {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-dialog settings-dialog';
+
+        // Header row with title and a close button (dismisses without saving).
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const titleEl = document.createElement('span');
+        titleEl.className = 'modal-title';
+        titleEl.textContent = 'Settings';
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'modal-close';
+        closeBtn.innerHTML = '&times;';
+        header.appendChild(titleEl);
+        header.appendChild(closeBtn);
+
+        // Body is filled with the section groups once /api/config responds.
+        const body = document.createElement('div');
+        body.className = 'modal-body settings-body';
+
+        // Footer: an error line (hidden until a save fails) plus Cancel/Save.
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer settings-footer';
+        const errorEl = document.createElement('div');
+        errorEl.className = 'settings-error hidden';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn-secondary';
+        cancelBtn.textContent = 'Cancel';
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn-primary';
+        saveBtn.textContent = 'Save';
+
+        dialog.appendChild(header);
+        dialog.appendChild(body);
+        footer.appendChild(errorEl);
+        footer.appendChild(cancelBtn);
+        footer.appendChild(saveBtn);
+        dialog.appendChild(footer);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        const close = () => overlay.remove();
+        closeBtn.addEventListener('click', close);
+        cancelBtn.addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+        // Load the current config; abort cleanly if it cannot be fetched.
+        let config;
+        try {
+            const resp = await fetch('/api/config');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            config = await resp.json();
+        } catch (err) {
+            this._showAlert('Could not load settings: ' + err.message, 'Settings');
+            close();
+            return;
+        }
+
+        // Per-key help text from the .config comments; shown under each option.
+        // Non-fatal - without it the popup still works, just without descriptions.
+        let descriptions = {};
+        try {
+            const descResp = await fetch('/api/config/descriptions');
+            if (descResp.ok) descriptions = await descResp.json();
+        } catch (_) {}
+
+        // Build one field per key. Each entry records its section/key/type so
+        // Save can read and coerce the control back to a value for the backend.
+        const fields = [];
+        for (const [section, values] of Object.entries(config)) {
+            const group = document.createElement('div');
+            group.className = 'settings-section';
+            const heading = document.createElement('h3');
+            heading.className = 'settings-section-title';
+            heading.textContent = section.replace(/_/g, ' ');
+            group.appendChild(heading);
+
+            for (const [key, value] of Object.entries(values)) {
+                const row = document.createElement('div');
+                row.className = 'settings-row';
+                const label = document.createElement('label');
+                label.className = 'settings-label';
+                label.textContent = key.replace(/_/g, ' ');
+
+                let input;
+                if (typeof value === 'boolean') {
+                    input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.checked = value;
+                    fields.push({ section, key, type: 'bool', el: input });
+                } else if (typeof value === 'number') {
+                    input = document.createElement('input');
+                    input.type = 'number';
+                    input.value = value;
+                    if (!Number.isInteger(value)) input.step = '0.1';
+                    fields.push({ section, key, type: 'number', el: input });
+                } else {
+                    input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = value;
+                    fields.push({ section, key, type: 'string', el: input });
+                }
+
+                const description = (descriptions[section] || {})[key];
+
+                row.appendChild(label);
+                row.appendChild(input);
+                if (description) {
+                    const descEl = document.createElement('div');
+                    descEl.className = 'settings-desc';
+                    descEl.textContent = description;
+                    row.appendChild(descEl);
+                }
+                group.appendChild(row);
+            }
+            body.appendChild(group);
+        }
+
+        // Save: read every control back into a {section:{key:value}} payload and POST it.
+        saveBtn.addEventListener('click', async () => {
+            const payload = {};
+            for (const f of fields) {
+                if (!payload[f.section]) payload[f.section] = {};
+                let v;
+                if (f.type === 'bool') {
+                    v = f.el.checked;
+                } else if (f.type === 'number') {
+                    const num = parseFloat(f.el.value);
+                    if (Number.isNaN(num)) {
+                        errorEl.textContent = `Please enter a valid number for "${f.key.replace(/_/g, ' ')}".`;
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                    v = num;
+                } else {
+                    v = f.el.value;
+                }
+                payload[f.section][f.key] = v;
+            }
+
+            saveBtn.disabled = true;
+            try {
+                const resp = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!resp.ok) {
+                    let msg = `Save failed (HTTP ${resp.status})`;
+                    try { const j = await resp.json(); if (j.error) msg = j.error; } catch (_) {}
+                    errorEl.textContent = msg;
+                    errorEl.classList.remove('hidden');
+                    return; // keep the popup open so the user can fix the value
+                }
+                const saved = await resp.json();
+                close();
+                this._applySavedUiSettings(saved.ui || {});
+                this.ui.showToggleMessage('Settings saved');
+            } catch (err) {
+                errorEl.textContent = 'Could not save settings: ' + err.message;
+                errorEl.classList.remove('hidden');
+            } finally {
+                saveBtn.disabled = false;
+            }
+        });
+
+        // Move focus to the first field once the overlay is painted.
+        const firstInput = body.querySelector('input, select');
+        if (firstInput) setTimeout(() => firstInput.focus(), 50);
+    }
+
+    /**
+     * Re-applies the frontend-facing ui.* settings that were just saved so they
+     * take effect in the live session without a reload. Only touches pure UI
+     * state (theme, units, tip mode, message-mute) - scene parameters persist to
+     * .config and apply on next load.
+     */
+    _applySavedUiSettings(uiValues) {
+        const ui = this.ui;
+
+        // Theme: "day" flips to the light UI; anything else is night (dark).
+        const night = (uiValues.theme ?? 'night') !== 'day';
+        if (this.nightModeEnabled !== night) {
+            this.nightModeEnabled = night;
+            document.body.classList.toggle('light-mode', !night);
+            if (ui.btnDayMode) ui.btnDayMode.classList.toggle('active', night);
+        }
+
+        // Units: shown in the status-bar unit toggle.
+        if (['mm', 'cm', 'in'].includes(uiValues.units) && ui._currentUnit !== uiValues.units) {
+            ui._currentUnit = uiValues.units;
+            if (ui.btnUnitToggle) ui.btnUnitToggle.textContent = uiValues.units;
+        }
+
+        // Tip mode: flips the persistent hover-description box.
+        const tip = !!uiValues.tip_mode;
+        if (this.tipModeEnabled !== tip) this._setTipMode(tip);
+
+        // View cube: flips the top-left orientation indicator.
+        const cube = !!uiValues.view_cube_visible;
+        if (this.viewCubeEnabled !== cube) this._setViewCubeEnabled(cube);
+
+        // Message mute: suppresses setting-change toasts.
+        const muted = !!uiValues.messages_muted;
+        if (ui.messagesMuted !== muted) {
+            ui.messagesMuted = muted;
+            if (ui.btnMuteMessages) {
+                ui.btnMuteMessages.classList.toggle('active', !muted);
+                ui.btnMuteMessages.title = muted
+                    ? 'Setting messages muted - click to unmute'
+                    : 'Toggle setting-change messages';
+            }
+        }
     }
 
     _bindUIEvents() {
@@ -753,8 +1179,15 @@ class App {
                         if (result.session_id) {
                             this.sessionId = result.session_id;
                         }
+                        // A multi-object archive (e.g. a saved 3MF) already carries the layout its
+                        // objects were placed at - snapping each piece to the plate individually
+                        // would destroy it, so only single-object imports get centered and dropped.
+                        const snapToFloor = result.objects.length === 1;
+                        // Import separation (.config [import]) applies under the same condition:
+                        // multi-piece archives keep their internal layout intact.
+                        const separate = snapToFloor && this.importSeparationEnabled;
                         for (const objData of result.objects) {
-                            const frontendId = this.meshSync.loadFromServer(objData, { snapToFloor: true, testHollow: true });
+                            const frontendId = this.meshSync.loadFromServer(objData, { snapToFloor, separate, testHollow: true });
                             if (hasId(frontendId) && hasId(objData.id)) {
                                 this.backendIds.set(frontendId, { sessionId: this.sessionId, objectId: objData.id });
                             }
@@ -794,8 +1227,13 @@ class App {
                         : null;
                     blob = await this.api.exportPreset(preset, this.sessionId, objectId);
                     downloadName = `model_${preset}.${preset === '3mf' ? '3mf' : 'stl'}`;
-                } else if (this.sessionId && scene.objects.size > 1) {
-                    blob = await this.api.exportAll(format, this.sessionId);
+                } else if (scene.objects.size > 1) {
+                    // Whole-scene combined export: snapshot every object client-side at its
+                    // current position instead of pulling one backend session's worth.
+                    if (format !== '3mf' && this._warnIfNotSolid(
+                        [...scene.objects.keys()], 'export', 'the shapes in the scene'
+                    )) return;
+                    blob = await this.api.exportScene(format, this._buildWorldSpaceMeshes(format));
                     downloadName = `combined_model.${format}`;
                 } else if (scene.selectedObject) {
                     const backendInfo = this.backendIds.get(scene.selectedObject);
@@ -892,7 +1330,7 @@ class App {
                         this._showAlert(`Cannot make solid: object "${id}" has no backend ID. Re-import the file.`);
                         return;
                     }
-                    const result = await this.api.repairMesh(backendInfo.sessionId || this.sessionId, backendInfo.objectId);
+                    const result = await this.api.solidifyMesh(backendInfo.sessionId || this.sessionId, backendInfo.objectId);
                     if (result && hasId(result.id)) {
                         this.meshSync.replaceObject(id, result, false, true);
                     }
@@ -957,13 +1395,8 @@ class App {
 
                     const geometry = sourceObj.geometry.clone();
                     const material = sourceObj.material.clone();
-                    // If the source object is currently selected, its material
-                    // carries the selection-highlight color in `emissive`.
-                    // Cloning it verbatim would bake that tint into the new
-                    // object permanently - the fresh mesh has no _origEmissive
-                    // backup yet, so the next selection/deselection cycle would
-                    // "restore" it straight back to the highlight color. Zeroing
-                    // it here keeps pasted copies looking unselected from the start.
+                    // A selected source carries the highlight tint in `emissive`; zeroing it here keeps pasted copies from baking
+                    // that in - the fresh mesh has no _origEmissive backup yet to restore from.
                     if (material.emissive) {
                         material.emissive.setHex(0x000000);
                     }
@@ -981,7 +1414,7 @@ class App {
                     scene.addObject(mesh, newFrontendId);
 
                     // Mirror the duplicate on the backend as well, so the pasted
-                    // copy keeps full support for repair, boolean ops, and export.
+                    // copy keeps full support for solid, boolean ops, and export.
                     if (entry.backendInfo && hasId(entry.backendInfo.objectId)) {
                         try {
                             const result = await this.api.duplicateObject(
@@ -992,7 +1425,7 @@ class App {
                                 this.backendIds.set(newFrontendId, { sessionId: entry.backendInfo.sessionId || this.sessionId, objectId: result.id });
                             }
                         } catch (err) {
-                            console.warn('Backend duplicate failed - pasted copy will need re-importing before repair/boolean ops/export will work:', err.message);
+                            console.warn('Backend duplicate failed - pasted copy will need re-importing before solid/boolean ops/export will work:', err.message);
                         }
                     }
 
@@ -1394,12 +1827,9 @@ class App {
             }
         });
 
-        // Separate - for each selected object, detects any physically
-        // disconnected pieces of geometry (e.g. a sphere and a cube that
-        // aren't touching) and splits them out into their own individual
-        // models. Purely topological, so it runs entirely client-side with no
-        // backend round trip; objects made of a single connected piece are left
-        // untouched.
+        // Separate - for each selected object, splits physically disconnected pieces of geometry (e.g. a sphere and a cube
+        // that aren't touching) into their own models. Purely topological, so it runs client-side with no backend round trip;
+        // single-piece objects are untouched.
         ui.on('separate', async () => {
             const selectedIds = scene.getSelectedObjectIds ? scene.getSelectedObjectIds() : [];
             if (!selectedIds || selectedIds.length === 0) {
@@ -1546,11 +1976,9 @@ class App {
         });
 
         ui.on('closeAiModal', () => {
-            // Generation runs as a background job that the modal doesn't own,
-            // but we still don't want it to disappear out from under an in-flight
-            // job with no way back to its Stop button - so require Stop first.
-            // (setAiGenerating(true) already disables the close button and
-            // backdrop-click for the same reason; this is a backstop.)
+            // Generation runs as a background job the modal doesn't own - require Stop first so an in-flight job can't
+            // disappear with no way back to its Stop button. (setAiGenerating(true) already disables close/backdrop-click
+            // for the same reason; this is a backstop.)
             if (this._aiJob) return;
             ui.hideAiModal();
         });
@@ -1907,11 +2335,17 @@ class App {
         ui.on('viewportClick', (clientX, clientY, shiftKey = false) => {
             if (this.splitMode.isActive()) return;
 
-            const pickedId = scene.pickObject(clientX, clientY);
+            let pickedId = scene.pickObject(clientX, clientY);
 
             if (!pickedId) {
-                // A click that lands on no model is ignored.
-                return;
+                // A click that lands on no visible surface still counts when it
+                // falls inside a selected shape's slightly enlarged invisible
+                // hitbox - the box is part of the shape's clickable region.
+                pickedId = scene.pickSelectedByHitbox ? scene.pickSelectedByHitbox(clientX, clientY) : null;
+                if (!pickedId) {
+                    // A click that lands on no model is ignored.
+                    return;
+                }
             }
 
             // A plain click adds or removes this object from the current
@@ -2060,11 +2494,8 @@ class App {
             ui.showToggleMessage(this.nightModeEnabled ? 'Night mode enabled' : 'Day mode enabled');
         });
 
-        // Aesthetic mode toggle - off by default. It hides every menu, toolbar,
-        // and panel except the bottom status bar (which turns solid black), and
-        // switches on more dramatic viewport lighting. All of that is done in CSS
-        // (see the .aesthetic-mode rules in app.css) except for the dramatic
-        // lighting itself.
+        // Aesthetic mode toggle - off by default; hides every menu/toolbar/panel except the status bar and switches on
+        // dramatic viewport lighting (all CSS, see .aesthetic-mode in app.css, except the lighting itself).
         ui.on('toggleAestheticMode', () => {
             this.aestheticModeEnabled = !this.aestheticModeEnabled;
             document.body.classList.toggle('aesthetic-mode', this.aestheticModeEnabled);
@@ -2074,12 +2505,8 @@ class App {
             if (scene.setDramaticLighting) {
                 scene.setDramaticLighting(this.aestheticModeEnabled);
             }
-            // Showing or hiding the toolbar and properties panel changes how much
-            // space #viewport-container occupies, but only through a CSS layout
-            // reflow - no window 'resize' event fires on its own. The renderer/
-            // camera sizing logic in SceneController listens for that event to
-            // know it should recompute, so we dispatch one manually after the new
-            // layout has actually been painted (double rAF).
+            // Toggling menus/panels resizes #viewport-container via CSS reflow only - no 'resize' event fires on its own,
+            // so dispatch one manually after the new layout paints (double rAF) for SceneController's renderer/camera sizing.
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     window.dispatchEvent(new Event('resize'));
@@ -2092,6 +2519,21 @@ class App {
 
         // Toggles whether setting-change toast messages are shown or muted
         ui.on('toggleMuteMessages', () => ui.toggleMuteMessages());
+
+        // Settings button (bottom-right) - opens the .config editor popup.
+        ui.on('openSettings', () => this._showSettingsPopup());
+
+        // Tip-mode toggle - flips the persistent hover-description box on/off.
+        ui.on('toggleTipMode', () => {
+            this._setTipMode(!this.tipModeEnabled);
+            ui.showToggleMessage(this.tipModeEnabled ? 'Tip mode enabled' : 'Tip mode disabled');
+        });
+
+        // Orientation-indicator toggle - flips the top-left axis gizmo on/off.
+        ui.on('toggleViewCube', () => {
+            this._setViewCubeEnabled(!this.viewCubeEnabled);
+            ui.showToggleMessage(this.viewCubeEnabled ? 'Orientation indicator enabled' : 'Orientation indicator disabled');
+        });
 
 
 
@@ -2196,12 +2638,8 @@ class App {
                 }
             }
 
-            // Commit whatever move/rotate/scale just happened to the backend.
-            // Both gizmo drags and direct-manipulation drags only update the
-            // Three.js object locally; without this commit, the backend's copy
-            // of the mesh silently drifts out of sync with what's on screen,
-            // and later union/subtract/intersect calls would run against stale,
-            // pre-drag geometry.
+            // Commit the just-finished move/rotate/scale to the backend - drags only update the local Three.js object, so
+            // without this the backend's copy drifts and later boolean ops would run on stale, pre-drag geometry.
             const idsToCommit = scene.getSelectedObjectIds().length > 0
                 ? scene.getSelectedObjectIds()
                 : (scene.selectedObject ? [scene.selectedObject] : []);
@@ -2302,14 +2740,8 @@ class App {
     }
 
     /**
-     * Serialize all transform commits through a single promise chain so two
-     * overlapping calls never both POST for the same backend object id. The
-     * `transform-end` handler fires this without awaiting, and Union/Subtract/
-     * Intersect/Split each await their own commit - if both run at once they
-     * capture the same objectId, and since a successful transform replaces the
-     * server-side object with a brand-new id (geometry.py deletes + re-saves),
-     * the second request hits "Object ... not found" (400). Chaining also makes
-     * later calls re-read the latest objectId after earlier commits swapped it.
+     * Serializes transform commits through one promise chain so overlapping calls never both POST for the same backend object id -
+     * a successful commit swaps in a new id, so a second stale request would 400; later calls re-read the latest objectId.
      */
     _commitTransforms(frontendIds) {
         const prev = this._transformCommitChain || Promise.resolve();
@@ -2320,22 +2752,8 @@ class App {
     }
 
     /**
-     * Commit the current client-side transform (position/rotation/scale) of
-     * one or more objects to the backend, baking it into their stored
-     * vertex data.
-     *
-     * This exists because the interactive gizmo and direct-manipulation
-     * dragging (and the Move/Rotate/Scale value bar) only ever mutate the
-     * Three.js object locally - the backend never otherwise learns that an
-     * object moved. Left uncommitted, that means union/subtract/intersect
-     * (and export) run against wherever the object was when it was
-     * created/imported, not wherever it visually ended up, which can make
-     * shapes that clearly overlap on screen fail with confusing errors
-     * like "operation produced an empty mesh".
-     *
-     * Objects with an identity local matrix (nothing actually moved) are
-     * skipped so this doesn't add a network round-trip on every selection
-     * change or no-op drag.
+     * Commits each object's current client-side transform to the backend, baking it into its stored vertices - drags only mutate the
+     * Three.js object locally, so uncommitted moves leave later ops on stale geometry. Identity-matrix objects are skipped.
      */
     async _doCommitTransforms(frontendIds) {
         const scene = this.sceneController;
@@ -2420,13 +2838,8 @@ class App {
         }
 
         if (anySucceeded) {
-            // Every transformed object above was just removed and rebuilt
-            // as a brand-new mesh (_loadMeshFromServer), which always
-            // starts out with plain "normal" material settings - that's
-            // why dragging/rotating an object while in wireframe,
-            // transparent, or wireframe-hybrid mode made it visually pop
-            // back to the default look. Reapply the active view mode to
-            // pick the new mesh(es) back up.
+            // Transformed objects were just rebuilt as brand-new meshes with plain "normal" materials, so reapply the active
+            // view mode to keep wireframe/transparent/hybrid looking right.
             if (scene.viewMode !== 'normal') {
                 scene.setViewMode(scene.viewMode);
             }
@@ -2494,16 +2907,84 @@ class App {
 
     _snapToBuildPlate(mesh) {
         const box = new THREE.Box3().setFromObject(mesh);
-        // Center the object horizontally (XZ) on the build plate's origin so it
-        // spawns in the middle of the plate instead of wherever its own bounding
-        // box happened to sit (primitives in particular come back with an offset
-        // footprint - e.g. a cube anchored at a corner, a cylinder/cone with its
-        // base on the z=0 plane). Shifting by the negative bbox center lands the
-        // object's horizontal midpoint exactly on the plate origin.
+        // Center the object horizontally (XZ) on the build plate's origin - primitives in particular come back with an offset
+        // footprint, so shift by the negative bbox center to land its midpoint exactly there.
         mesh.position.x -= (box.min.x + box.max.x) / 2;
         mesh.position.z -= (box.min.z + box.max.z) / 2;
         // Drop it until its lowest point rests on the build plate (y = 0).
         mesh.position.y -= box.min.y;
+    }
+
+    /**
+     * Import separation (.config [import]): shifts a freshly imported mesh along X/Z so its bounding box ends up at least
+     * importMinGapMm clear of every other object's box; runs after _snapToBuildPlate, so the shape stays seated on the plate.
+     * Sweeps all four directions and applies the cheapest escape (zero distance = no movement).
+     */
+    _applyImportSeparation(mesh) {
+        const scene = this.sceneController;
+        if (scene.objects.size === 0) return;
+
+        const gap = this.importMinGapMm;
+        const box = new THREE.Box3().setFromObject(mesh);
+        if (box.isEmpty()) return;
+
+        // Every other object's world-space bounding box.
+        const others = [];
+        for (const id of scene.objects.keys()) {
+            const obj = scene.objects.get(id);
+            if (!obj || obj === mesh) continue;
+            const b = new THREE.Box3().setFromObject(obj);
+            if (!b.isEmpty() && isFinite(b.min.x) && isFinite(b.max.z)) others.push(b);
+        }
+
+        // Two boxes are clear of each other once separated by at least `gap` on X or Z.
+        const zClear = (a, b) => a.min.z >= b.max.z + gap || a.max.z <= b.min.z - gap;
+        const xClear = (a, b) => a.min.x >= b.max.x + gap || a.max.x <= b.min.x - gap;
+
+        // Sweep the box's footprint out of every other box along one horizontal axis.
+        // Returns how far it would travel (0 = already clear of everything). The sweep
+        // only ever moves in the given direction, jumping past offending boxes until
+        // none remain - guaranteed to settle since each jump lands further along.
+        const sweepDistance = (axis, dir) => {
+            let lo = axis === 'x' ? box.min.x : box.min.z;
+            let hi = axis === 'x' ? box.max.x : box.max.z;
+            const start = lo;
+
+            for (let iter = 0; iter <= others.length + 1; iter++) {
+                // Offenders: not clear on the static axis and closer than `gap` on this one.
+                let target = dir > 0 ? -Infinity : Infinity;
+                for (const e of others) {
+                    const eLo = axis === 'x' ? e.min.x : e.min.z;
+                    const eHi = axis === 'x' ? e.max.x : e.max.z;
+                    if (axis === 'x' ? zClear(box, e) : xClear(box, e)) continue;
+                    if (eHi <= lo - gap || hi <= eLo - gap) continue; // already separated on this axis
+                    target = dir > 0 ? Math.max(target, eHi + gap) : Math.min(target, eLo - gap);
+                }
+                if (!isFinite(target)) return Math.abs(start - lo); // nothing left to clear
+                // Jump so the leading edge lands on `target`: +dir moves lo up, -dir moves hi down.
+                const delta = dir > 0 ? target - lo : hi - target;
+                lo += dir * delta;
+                hi += dir * delta;
+            }
+
+            return Math.abs(start - lo);
+        };
+
+        const candidates = [
+            { axis: 'x', dir: 1, dist: sweepDistance('x', 1) },
+            { axis: 'x', dir: -1, dist: sweepDistance('x', -1) },
+            { axis: 'z', dir: 1, dist: sweepDistance('z', 1) },
+            { axis: 'z', dir: -1, dist: sweepDistance('z', -1) },
+        ];
+
+        // Take the cheapest escape; no movement at all when everything is already clear.
+        let best = null;
+        for (const c of candidates) {
+            if (c.dist > 0 && (!best || c.dist < best.dist)) best = c;
+        }
+        if (!best) return;
+
+        mesh.position[best.axis] += best.dir * best.dist;
     }
 
     _snapSelectedToCenter() {

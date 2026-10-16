@@ -1,8 +1,4 @@
-"""Unit tests for the STL parser covering both binary and ASCII variants.
-
-Covers format detection, parsing, writing, round-trips, normal
-recomputation, and malformed-input handling.
-"""
+"""Unit tests for the STL parser (binary and ASCII variants)."""
 # ColliBoy
 
 import io
@@ -26,7 +22,7 @@ from app.parsers.stl_parser import (
 # binary stl coverage
 
 def _make_binary_stl(num_triangles: int, start_x: float = 0.0) -> bytes:
-    """Generate a minimal valid binary STL payload with collinear triangles."""
+    """Build a minimal binary STL payload of collinear triangles."""
     header = b'Binary STL test file\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
     header = header[:80].ljust(80, b'\x00')
 
@@ -37,7 +33,7 @@ def _make_binary_stl(num_triangles: int, start_x: float = 0.0) -> bytes:
     for i in range(num_triangles):
         # fixed normal pointing along +x
         buf.write(struct.pack('<fff', 1.0, 0.0, 0.0))
-        # triangle corners stepping two units apart along x
+        # triangles step 2 units apart along x
         x = start_x + i * 2.0
         buf.write(struct.pack('<fff', x, 0.0, 0.0))
         buf.write(struct.pack('<fff', x + 1.0, 1.0, 0.0))
@@ -54,7 +50,7 @@ def test_detect_binary_stl():
 
 
 def test_parse_binary_single_triangle():
-    """A single-triangle binary STL decodes to one vertex triple with its normal."""
+    """A single triangle yields three vertices and its normal."""
     data = _make_binary_stl(1)
     vertices, normals = parse_binary_stl(data)
 
@@ -92,7 +88,7 @@ def test_parse_binary_too_small():
 
 # ColliBoy
 def _make_ascii_stl(num_triangles: int = 3) -> bytes:
-    """Generate a minimal valid ASCII STL document with collinear facets."""
+    """Build a minimal ASCII STL document of collinear facets."""
     lines = ['solid test']
 
     for i in range(num_triangles):
@@ -116,7 +112,7 @@ def test_detect_ascii_stl():
 
 
 def test_parse_ascii_basic():
-    """A basic ASCII document decodes to the expected vertex and normal counts."""
+    """ASCII documents decode to the expected vertex and normal counts."""
     num_tris = 3
     data = _make_ascii_stl(num_tris)
     vertices, normals = parse_ascii_stl(data)
@@ -141,7 +137,7 @@ def test_parse_ascii_empty():
         parse_ascii_stl(data)
 
 
-# auto-detection through the generic entry point
+# auto-detection via parse_stl
 
 def test_parse_auto_detect_binary():
     """parse_stl routes binary payloads to the binary decoder."""
@@ -275,8 +271,7 @@ def test_parse_empty_data():
 
 
 def test_parse_garbage_data():
-    """A plausible header whose declared count exceeds the payload is rejected."""
-    # header plus a triangle count that the body cannot satisfy
+    """Declared triangle counts exceeding the payload are rejected."""
     header = b'\x00' * 80
     buf = bytearray(header)
     buf.extend(struct.pack('<I', 1))  # declares one triangle

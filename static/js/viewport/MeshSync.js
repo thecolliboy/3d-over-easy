@@ -3,10 +3,9 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { hasId } from '../api/ApiClient.js';
 
 /**
- * ColliBoy - Loads meshes returned by backend operations into the scene and
- * swaps existing objects in place with their freshly computed server geometry,
- * carrying over selection/gizmo context; also kicks off LOD generation for
- * dense meshes.
+ * ColliBoy - Loads backend mesh payloads into the scene and swaps existing
+ * objects in place with fresh server geometry (carrying over selection/gizmo
+ * context); kicks off LOD generation for dense meshes.
  */
 export class MeshSync {
     constructor(app) {
@@ -18,25 +17,17 @@ export class MeshSync {
      *
      * @param {object} objData - server object data (vertices/indices/normals/colors/id)
      * @param {object} [options]
-     * @param {boolean} [options.snapToFloor=false] - Only true for genuinely new
-     *   content (fresh imports, new primitives). Anything that replaces an
-     *   existing object - transform commits, union/subtract/intersect,
-     *   split pieces, simplify/repair, undo/redo - must preserve whatever
-     *   position the backend returned instead of re-snapping to the build
-     *   plate, otherwise the object visibly jumps back to the floor.
-     * @param {THREE.Color} [options.color] - Reuse this color instead of
-     *   generating a new one, so replacing an object (e.g. after a
-     *   transform) doesn't change its color.
+     * @param {boolean} [options.snapToFloor=false] - Only for genuinely new content; replacements must keep the backend-returned position.
+     * @param {THREE.Color} [options.color] - Reuse this color instead of generating a new one (e.g. after a transform).
+     * @param {boolean} [options.separate=false] - Import separation (.config [import]): shift along X/Z until at least min_gap_mm clear of every existing bounding box; only meaningful with snapToFloor.
      */
     loadFromServer(objData, options = {}) {
         const app = this.app;
-        const { snapToFloor = false, color = null, testHollow = false } = options;
+        const { snapToFloor = false, color = null, testHollow = false, separate = false } = options;
         if (!objData || !objData.vertices) return null;
 
         const vertices = new Float32Array(objData.vertices);
-        // Use Uint32Array (not Uint16Array) - CSG results in particular can
-        // easily exceed 65,536 vertices, and a 16-bit index array silently
-        // wraps around and corrupts the geometry instead of erroring.
+        // Uint32 indices: CSG results can exceed 65,536 vertices and a 16-bit index would wrap silently.
         const indices = objData.indices ? new Uint32Array(objData.indices) : null;
         const normals = objData.normals ? new Float32Array(objData.normals) : null;
         const hasVertexColors = !!(objData.colors && objData.colors.length > 0);
@@ -54,19 +45,7 @@ export class MeshSync {
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         }
 
-        // Weld coincident vertices before computing normals. Server data
-        // isn't guaranteed to share vertices across adjacent triangles -
-        // raw/unindexed import data in particular (e.g. triangle-soup STL
-        // straight off disk) duplicates a vertex for every face that
-        // touches it, so there's nothing for computeVertexNormals() to
-        // average across and smooth shading ends up looking identical to
-        // flat no matter what the material's flatShading flag says.
-        // Welding first (attributes and all, so vertex colors stay
-        // aligned) makes smooth shading actually possible on every load
-        // path - not just ones that happen to already come back indexed/
-        // welded, like transform-commit results from the mesh-editing
-        // kernel, which is why the toggle only ever "worked" after moving
-        // an object once.
+        // Weld coincident vertices (attributes included) before computing normals; unwelded imports duplicate vertices per face, so smooth shading would degrade to flat.
         try {
             const welded = mergeVertices(geometry);
             if (welded) {
@@ -78,7 +57,7 @@ export class MeshSync {
         }
         geometry.computeVertexNormals();
 
-        // Build the material for this mesh - per-vertex coloring when the source data carries it, otherwise a single flat base tone.
+        // Per-vertex colors if carried by the payload; otherwise a single base tone.
         let material;
         if (hasVertexColors) {
             material = new THREE.MeshStandardMaterial({
@@ -87,10 +66,7 @@ export class MeshSync {
                 metalness: 0.1,
             });
         } else {
-            // Reuse the previous color if one was passed in (e.g. this load
-            // is replacing an object after a transform/simplify/etc., not
-            // introducing new content); otherwise generate a nice,
-            // evenly-spread color for this new object.
+            // Reuse the passed-in color when replacing an object; otherwise assign a fresh one.
             material = new THREE.MeshStandardMaterial({
                 color: color || app._nextObjectColor(),
                 roughness: 0.5,
@@ -102,26 +78,20 @@ export class MeshSync {
         const frontendId = hasId(objData.id) ? objData.id : `obj_${Date.now()}`;
         mesh.name = frontendId;
 
-        // Solid indicator (shown in the properties panel as "Solid: Yes/No").
-        // A shape is NOT solid when its surface isn't watertight (it has
-        // open boundary edges/holes) - the same condition that makes CSG
-        // ops (Split/Merge/Subtract/Intersect) fail until repaired via the
-        // Solid/Repair tools. Only imported/opened models are actually
-        // tested - primitives and CSG results are assumed solid, since the
-        // engine only ever produces closed geometry for those.
+        // Solid indicator ("Solid: Yes/No" in the properties panel): non-watertight surfaces fail CSG ops until repaired; only imported models are actually tested.
         mesh.userData.isSolid = testHollow ? !app.sceneController.detectHollow(geometry) : true;
 
-        // Center and snap to build plate - only for genuinely new content.
-        // Replacement loads (transform commits, boolean ops, split, undo/
-        // redo, etc.) already carry the position they should have.
+        // Snap to the build plate only for genuinely new content; replacement loads keep their returned position.
         if (snapToFloor) {
             app._snapToBuildPlate(mesh);
+            // Import separation (.config [import]): keep at least min_gap_mm clear of every existing bounding box.
+            if (separate) app._applyImportSeparation(mesh);
         }
 
         app.sceneController.addObject(mesh, frontendId);
         app._updateBuildPlateExtent();
 
-        // Kick off level-of-detail generation once a mesh is dense enough to warrant the server round-trip (~1000+ faces).
+        // LOD generation for meshes dense enough to warrant the server round-trip.
         const faceCount = indices ? indices.length / 3 : vertices.length / 3;
         if (faceCount > 1000 && app.sessionId) {
             this.computeLodForObject(frontendId, app.sessionId);
@@ -131,22 +101,10 @@ export class MeshSync {
     }
 
     /**
-     * Detect physically disconnected pieces within a single mesh's geometry
-     * and, if there's more than one, split it into a set of standalone
-     * piece descriptors - one per connected group of triangles - in the
-     * same { vertices, indices, normals, colors } shape _loadMeshFromServer
-     * expects (world-space vertices, so the resulting meshes need no
-     * position/rotation/scale of their own).
-     *
-     * "Connected" is determined by shared vertex position (within a small
-     * tolerance), not shared vertex index - this correctly reunites seams
-     * where the same point appears as separate, duplicated vertices (e.g.
-     * for hard-edge normals), while still treating two shapes that merely
-     * touch at a single coincident point as connected, matching how a
-     * physical, watertight print would behave.
-     *
-     * Returns null if the mesh has zero or one connected piece (i.e.
-     * there's nothing to separate).
+     * Split a mesh into standalone pieces per physically disconnected group of triangles, in the same
+     * { vertices, indices, normals, colors } shape loadFromServer expects (world-space vertices, no
+     * transform needed). Connectivity is by shared vertex position within tolerance, not index.
+     * Returns null for zero or one piece.
      */
     _findConnectedComponents(mesh) {
         const geometry = mesh.geometry;
@@ -170,9 +128,7 @@ export class MeshSync {
         }
         if (triangles.length === 0) return null;
 
-        // Canonicalize vertices by (rounded) position so coincident points
-        // sharing the same location - regardless of vertex index - are
-        // treated as the same node for connectivity purposes.
+        // Canonicalize vertices by rounded position so coincident points share a node regardless of index.
         const PRECISION = 1e5; // merges points within ~0.00001 units
         const canonicalId = new Map();
         const originalToCanonical = new Int32Array(vertexCount);
@@ -219,10 +175,7 @@ export class MeshSync {
 
         if (groups.size <= 1) return null;
 
-        // Bake this mesh's world transform into vertex positions/normals so
-        // each piece can be loaded as a standalone object with no transform
-        // of its own, exactly matching the convention _loadMeshFromServer
-        // already assumes for server-provided geometry.
+        // Bake the world transform into vertices/normals so each piece loads as a standalone object.
         mesh.updateMatrixWorld(true);
         const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
         const v = new THREE.Vector3();
@@ -285,47 +238,26 @@ export class MeshSync {
     }
 
     /**
-     * Swap an already-placed object for freshly computed server geometry - used by
-     * in-place operations (simplify, repair, rotate) that return new mesh data for
-     * the same logical object. The old mesh is discarded and re-loaded; whatever
-     * selection or gizmo state pointed at it is carried over to the replacement so
-     * the user's context survives the swap.
+     * Swap an existing object in place with fresh server geometry (simplify, solidify, rotate);
+     * selection/gizmo state carries over to the replacement.
      */
     replaceObject(frontendId, resultData, resetView = false, preserveCenter = false) {
         const app = this.app;
         const scene = app.sceneController;
         const wasPrimarySelected = scene.selectedObject === frontendId;
-        // Multi-select membership, not just the single "primary" selected
-        // object - callers like the Solid handler call this once per object
-        // in a multi-selection, and the old code below used to call
-        // scene.selectObject() (a single-select operation) which wiped out
-        // every other selected object the first time it ran, silently
-        // dropping the rest of the multi-selection.
+        // Track full multi-select membership; a single selectObject() here would wipe the other selections.
         const wasInSelection = scene.getSelectedObjectIds().includes(frontendId);
 
-        // Remember which backend session this specific object actually
-        // lives in before its entry gets deleted below. Different objects
-        // in the scene can legitimately carry different session ids (see
-        // the createPrimitive fix above), so the replacement must stay
-        // tagged with the object's own session - not silently reassigned
-        // to whatever App.sessionId happens to be "current" right now,
-        // which may belong to a completely different object.
+        // Capture this object's backend session before deleting its entry; objects can carry sessions different from App.sessionId.
         const oldBackendInfo = app.backendIds.get(frontendId);
 
-        // Preserve the object's current color - this is a like-for-like
-        // replacement (simplify, repair, server-side rotate, etc.), not new
-        // content, so it shouldn't get reassigned a fresh color.
+        // Preserve the current color; this is a like-for-like replacement, not new content.
         const oldObj = scene.objects.get(frontendId);
         const color = (oldObj && oldObj.material && oldObj.material.color && !oldObj.material.vertexColors)
             ? oldObj.material.color.clone()
             : null;
 
-        // Some server operations (e.g. the mesh-repair endpoint used by
-        // "Solid") return geometry re-centered on the origin instead of
-        // preserving the object's on-screen position. When preserveCenter
-        // is set, capture the old object's world bounding-box center before
-        // swapping it out, then nudge the replacement back so it visually
-        // stays put instead of jumping to the center of the scene.
+        // Some server ops (e.g. "Solid") return geometry re-centered on the origin; with preserveCenter, capture the old bbox center and nudge the replacement back.
         let oldCenter = null;
         if (preserveCenter && oldObj) {
             const box = new THREE.Box3().setFromObject(oldObj);
@@ -359,10 +291,7 @@ export class MeshSync {
             });
         }
 
-        // Restore selection if it was selected before - add back into
-        // whatever selection currently exists rather than replacing it, so
-        // replacing one object out of a multi-selection doesn't deselect
-        // the others.
+        // Re-add to the current selection (not replace) so other selected objects stay selected.
         if (wasInSelection) {
             scene.addToSelection(newFrontendId);
             if (wasPrimarySelected) {

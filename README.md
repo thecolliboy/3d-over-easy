@@ -6,11 +6,10 @@ A browser-based 3D mesh editor: Flask backend, Three.js frontend.
 
 ## Features
 
-- Import STL, OBJ, PLY, GLB/GLTF, 3MF, FBX
-- Export STL, OBJ, PLY
+- Import/export STL, OBJ, PLY, GLB/GLTF, 3MF
 - CSG booleans (union, subtract, intersect) via manifold3d
-- Geometry operations: repair, hollow, cut, scale, rotate, translate, simplify, smooth, fillet, chamfer
-- Primitive solids (box, cylinder, sphere... and egg!)
+- Geometry operations: solid, hollow, cut, scale, rotate, translate, simplify, smooth, fillet, chamfer
+- Primitive solids (box, cylinder, sphere, and more)
 - Undo/redo history
 - AI text-to-CAD generation with local .gguf models or an OpenAI-compatible API
 
@@ -26,11 +25,29 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Serves the editor at http://localhost:8181 by default. Host, port, and worker count come from `.config`, then `HOST`/`PORT` env vars, then built-in defaults.
+Serves the editor at http://localhost:8181. Host, port, and worker count come from `.config`, then `HOST`/`PORT` env vars, then built-in defaults.
+
+## Docker
+
+Run with docker compose:
+
+```yaml
+services: web3dbuilder:
+    image: colliboy/3d-over-easy:latest
+    ports:
+      - "8181:8181"
+    restart: unless-stopped
+```
+
+Or run the container directly:
+
+```bash
+docker run --rm -p 8181:8181 colliboy/3d-over-easy:latest
+```
+
+Serves the editor at http://localhost:8181. The image binds all interfaces and skips launching a browser, so port mapping works out of the box; mount your own `.config` to override settings.
 
 ## Tests
-
-I wanted to include these in case anyone decides they wanted to make any major overhauls to their copy of the project.
 
 ```bash
 pytest tests -q

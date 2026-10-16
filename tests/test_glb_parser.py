@@ -84,7 +84,7 @@ def _make_minimal_glb(num_vertices: int = 3, num_indices: int = 3) -> bytes:
 
     json_str = json.dumps(json_content)
     json_bytes = json_str.encode('utf-8')
-    json_padding = (4 - len(json_bytes) % 4) % 4  # pad to a four-byte boundary so chunk offsets stay aligned (ColliBoy)
+    json_padding = (4 - len(json_bytes) % 4) % 4  # pad JSON to a four-byte boundary (ColliBoy)
     json_bytes += b' ' * json_padding
 
     # binary chunk payload: packed positions followed by index values

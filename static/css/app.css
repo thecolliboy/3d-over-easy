@@ -49,7 +49,7 @@
     --aesthetic-text: #19191b;
 }
 
-/* --- Light theme, engaged while the day/night toggle sits in its day position --- */
+/* --- Light theme (day/night toggle in day position) --- */
 body.light-mode {
     --bg-primary: #f4f5f8;
     --bg-secondary: #e9ebf1;
@@ -66,11 +66,10 @@ body.light-mode {
     --border-color: #d7dae2;
 }
 
-/* Active states normally pair --bg-active with an accent border and white
-   text. Under the light theme that saturated blue clashes with the neutral
-   grey button groups (the always-on build-plate buttons vs. the view-mode
-   ones), so active buttons here get a darker-grey treatment instead - same
-   hue family as the surrounding UI, just bold enough to read as "on". */
+/* Active states normally pair --bg-active with an accent border and white text;
+   under the light theme that saturated blue clashes with the neutral grey button
+   groups, so active buttons get a darker-grey treatment instead - same hue family,
+   just bold enough to read as "on". */
 body.light-mode .toolbar-btn:active,
 body.light-mode .toolbar-btn.active,
 body.light-mode .view-mode-btn.active,
@@ -111,6 +110,8 @@ html, body {
     user-select: none;
 }
 
+/* Buttons never shrink below their natural size (flex-shrink: 0 on .toolbar-btn),
+   so the toolbar squeezes in discrete tiers instead of compressing labels */
 .toolbar-group {
     display: flex;
     align-items: center;
@@ -129,6 +130,7 @@ html, body {
     flex: 1;
 }
 
+/* Squeeze tiers (JS-driven): UIManager gives #toolbar a .squeeze-tier-N class, the widest tier that fits. Labels are shown in full or hidden entirely - never truncated mid-word. */
 .toolbar-btn {
     display: flex;
     align-items: center;
@@ -141,7 +143,34 @@ html, body {
     font-size: 12px;
     cursor: pointer;
     white-space: nowrap;
+    flex-shrink: 0;
     transition: background 0.15s, border-color 0.15s;
+}
+
+.toolbar-btn span {
+    white-space: nowrap;
+}
+
+/* Tier 2 - the inline labels no longer fit: each label stacks under its icon
+   in a slightly smaller font */
+#toolbar.squeeze-tier-2 .toolbar-btn {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-8);
+}
+
+#toolbar.squeeze-tier-2 .toolbar-btn span {
+    font-size: 10px;
+}
+
+/* Tier 3 - even the stacked labels no longer fit: icons only */
+#toolbar.squeeze-tier-3 .toolbar-btn {
+    padding: var(--space-6) var(--space-8);
+}
+
+#toolbar.squeeze-tier-3 .toolbar-btn span {
+    display: none;
 }
 
 .toolbar-btn:hover {
@@ -179,6 +208,55 @@ html, body {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+/* --- Orientation indicator, docked at the top-left of the viewport --- */
+.view-cube {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    width: 64px;
+    height: 64px;
+    z-index: 10;
+    pointer-events: none; /* never block viewport picking */
+    border-radius: 8px;
+    background: rgba(13, 13, 26, 0.7);
+    border: 1px solid var(--border-color);
+}
+
+.view-cube canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* --- Tip mode box, docked at the top-right of the viewport --- */
+.tip-box {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 30;
+    width: 240px;
+    background: var(--bg-toolbar);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: var(--space-10) var(--space-12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    pointer-events: none; /* never block viewport picking */
+}
+
+.tip-box-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: var(--space-4);
+}
+
+.tip-box-desc {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    white-space: pre-line;
 }
 
 /* --- Shading view toggles, docked at the bottom-left of the viewport --- */
@@ -444,14 +522,21 @@ html, body {
     color: var(--text-primary);
 }
 
-/* Collapsible sections of the right-hand panel (Scene Objects / Properties / Controls) */
+/* Collapsible sections of the right-hand panel (Scene Objects / Properties / Controls / About).
+   They stack top-to-bottom and never compress below their content, so they can't overlap or clip;
+   RightPanel.js collapses them by priority when space runs short. Properties is the exception - see .panel-section-grow. */
 .panel-section {
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
 }
 
+/* Properties is the flexible section - it absorbs leftover vertical space and, when the
+   other sections squeeze it, compresses by scrolling internally down to its minimum
+   (header + .panel-body's min-height) instead of pushing Controls/About out of view. */
 .panel-section-grow {
-    flex: 1;
+    flex-grow: 1;
+    flex-shrink: 1;
     min-height: 0;
 }
 
@@ -470,32 +555,31 @@ html, body {
 }
 
 /* A collapsed section shrinks to its header instead of keeping the grown space.
-   flex-basis must be reset too: .panel-section-grow's `flex: 1` sets basis 0%,
-   which would otherwise collapse the section to height 0 (title spills out and
-   the next section overlaps it) once grow is zeroed on collapse. */
+   flex-basis must be reset too: .panel-section-grow's grow would otherwise leave an
+   empty box (title spills out and the next section overlaps it) once grow is zeroed. */
 .panel-section.collapsed {
     flex-grow: 0;
     flex-basis: auto;
 }
 
-/* Ad banner pinned to the bottom of the right-hand panel */
-.panel-banner {
-    flex-shrink: 0;
-    height: 200px;
-    border-top: 1px solid var(--border-color);
+/* About - the ColliBoy ad iframe under a collapsible title bar, last in the menu */
+.panel-about-body {
+    padding: 0;
 }
 
-.panel-banner iframe {
+.panel-about-body iframe {
     display: block;
     width: 100%;
-    height: 100%;
+    height: 150px; /* slightly smaller than the old banner to leave room for the title bar */
     border: none;
 }
 
+/* Properties body - grows with its section and scrolls internally, but stays readable when squeezed */
 .panel-body {
     flex: 1;
     overflow-y: auto;
     padding: var(--space-12);
+    min-height: 90px; /* minimum allowed height for the properties menu while expanded */
 }
 
 .no-selection {
@@ -539,6 +623,19 @@ html, body {
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-toolbar);
     flex-shrink: 0;
+}
+
+/* Shrink-to-fit mode (ui.preview_shrink): fixed height with no scroll. Cells fill
+   their grid track instead of staying square so every box stays visible when there
+   are too many to fit at the natural size. */
+.object-list--shrink {
+    height: 216px;
+    overflow: hidden;
+}
+
+.object-list--shrink .object-thumb {
+    aspect-ratio: auto;
+    height: 100%;
 }
 
 .object-list-empty {
@@ -708,11 +805,9 @@ body.light-mode #btn-day-mode .day-menu-icon { display: block; }
 body.light-mode #btn-day-mode .night-menu-icon { display: none; }
 
 /* --- Setting-change toast ---
-   Positioned inside #viewport-container, immediately right of the five 36px
-   view-mode buttons in #view-modes (12px inset plus four var(--space-4)
-   gaps). It used to be a screen-centered fixed toast that collided with the
-   transform-mode-bar; anchoring it beside the view modes keeps it clear at
-   any viewport width. */
+   Positioned inside #viewport-container, right of the five 36px view-mode buttons
+   (12px inset plus four var(--space-4) gaps). Anchored here rather than screen-centered
+   so it never collides with the transform-mode-bar at any viewport width. */
 .toggle-message-toast {
     position: absolute;
     left: calc(12px + (5 * 36px) + (4 * var(--space-4)) + var(--space-8));
@@ -786,14 +881,6 @@ body.light-mode #btn-day-mode .night-menu-icon { display: none; }
 @media (max-width: 768px) {
     :root {
         --panel-width: 220px;
-    }
-
-    .toolbar-btn span {
-        display: none;
-    }
-
-    .toolbar-btn {
-        padding: var(--space-6) var(--space-8);
     }
 }
 
@@ -1273,6 +1360,96 @@ body.light-mode #btn-day-mode .night-menu-icon { display: none; }
     border-color: var(--text-muted);
 }
 
+/* --- Settings (.config editor) popup --- */
+.settings-dialog {
+    min-width: 420px;
+    max-width: 560px;
+}
+
+.settings-body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.settings-section {
+    margin-bottom: var(--space-16);
+}
+
+.settings-section:last-child {
+    margin-bottom: 0;
+}
+
+.settings-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: var(--space-6);
+    margin-bottom: var(--space-8);
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-12);
+    padding: var(--space-4) 0;
+    flex-wrap: wrap;
+}
+
+.settings-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    flex: 1;
+}
+
+/* Per-key help text from the .config comments, under each option. */
+.settings-desc {
+    width: 100%;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.settings-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.settings-row input[type="number"],
+.settings-row input[type="text"] {
+    width: 160px;
+    padding: var(--space-6) var(--space-8);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    flex: 0 0 auto;
+}
+
+.settings-row input[type="number"]:focus,
+.settings-row input[type="text"]:focus {
+    border-color: var(--accent);
+}
+
+.settings-footer .settings-error {
+    flex: 1;
+    text-align: left;
+    color: #ff6b6b;
+    font-size: 12px;
+}
+
+.settings-error.hidden {
+    display: none;
+}
+
 /* --- Text-to-geometry assistant dialog --- */
 .ai-modal-dialog {
     min-width: 420px;
@@ -1709,7 +1886,8 @@ body.aesthetic-mode .transform-mode-bar,
 body.aesthetic-mode .transform-value-bar,
 body.aesthetic-mode #view-modes,
 body.aesthetic-mode #grid-snap-controls,
-body.aesthetic-mode #build-plate-controls {
+body.aesthetic-mode #build-plate-controls,
+body.aesthetic-mode .view-cube {
     display: none !important;
 }
 

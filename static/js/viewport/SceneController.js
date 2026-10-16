@@ -4,8 +4,8 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 
-// Single source of truth for the selection hue - main.js derives its
-// highlight glow from it, so no module invents a competing color.
+// Single source of truth for the selection hue; main.js derives its
+// highlight glow from it.
 export const SELECTION_COLOR = 0x5390d9;
 
 // Axis stub length as a fraction of the build-plate edge (0.3 at the default 10-unit plate)
@@ -22,9 +22,8 @@ export class SceneController {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x0d0d1a);
 
-        // Perspective camera - 50° fov keeps part-scale geometry undistorted;
-        // the far plane comes from .config (viewport.camera_far) so huge models
-        // can be framed without their far side being clipped by it.
+        // Perspective camera; the far plane comes from .config
+        // (viewport.camera_far) so large models aren't clipped at range.
         this.camera = new THREE.PerspectiveCamera(
             50,
             this.getAspect(),
@@ -40,7 +39,7 @@ export class SceneController {
             antialias: true,
             alpha: false,
             powerPreference: 'high-performance',
-            stencil: false,  // nothing here draws into the stencil buffer; skipping it saves VRAM
+            stencil: false,  // no draw call here uses the stencil buffer
         });
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.shadowMap.enabled = true;
@@ -59,10 +58,8 @@ export class SceneController {
         // Assemble the four-light rig
         this.setupLighting();
 
-        // Simple-plate mode - when on, resizes stretch the existing plate
-        // furniture instead of disposing and rebuilding it (cheaper for the
-        // frequent auto-resizes the infinite build plate performs). Seeded
-        // from .config via App.
+        // Simple-plate mode - resizes stretch the existing plate furniture
+        // instead of disposing and rebuilding; seeded from .config via App.
         this.simplePlateMode = options.simplePlate ?? false;
 
         // Lay down the build-plate furniture (grid, surface, axes, border);
@@ -78,11 +75,9 @@ export class SceneController {
         // Active view mode
         this.viewMode = 'normal'; // one of normal / wireframe / transparent / wireframe-hybrid
 
-        // Shading style - tracked separately from viewMode above. Flat
-        // (default) gives every triangle its own face normal, so adjoining
-        // facets catch light differently and the model reads as raw solid
-        // polygons; smooth (the old default) blends normals across shared
-        // vertices for a rounded, bumpy look instead. Seeded from .config via App.
+        // Shading style - tracked separately from viewMode above. Flat is the
+        // per-face normal default; smooth blends normals across shared
+        // vertices. Seeded from .config via App.
         this.smoothShading = options.smoothShading ?? false;
 
         // Level-of-detail system - each object may carry several detail levels
@@ -114,8 +109,8 @@ export class SceneController {
         this.renderer.setSize(width, height);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        // LineMaterial measures its screen-space pixel width against the canvas
-        // size, so keep it in sync or the axis stubs' thickness drifts on resize
+        // Keep LineMaterial's resolution in sync with the canvas, or the
+        // axis stubs' screen-space thickness drifts on resize.
         this._syncAxisResolution();
     }
 
@@ -167,11 +162,8 @@ export class SceneController {
     }
 
     /**
-     * Aesthetic Mode's lighting treatment: dims the flat ambient and
-     * hemisphere fills so shapes gain contrast, warms and boosts the main
-     * directional "sun" for punchier highlights, shifts the fill light cool
-     * for warm/cool separation, and nudges exposure up for a cinematic feel.
-     * Passing false restores exactly what setupLighting() captured.
+     * Aesthetic Mode's lighting treatment; passing false restores what
+     * setupLighting() captured.
      */
     setDramaticLighting(enabled) {
         const lights = this._lights;
@@ -203,11 +195,8 @@ export class SceneController {
     }
 
     /**
-     * Even-lighting treatment: flattens the rig so every surface is lit about
-     * equally - boosts the ambient and hemisphere fills and dims the shadow-
-     * casting directional key to a whisper. Passing false restores exactly what
-     * setupLighting() captured, re-applying dramatic lighting when aesthetic
-     * mode is active (aestheticActive).
+     * Even-lighting treatment; passing false restores what setupLighting()
+     * captured, re-applying dramatic lighting when aestheticActive.
      */
     setEvenLighting(enabled, aestheticActive = false) {
         const lights = this._lights;
@@ -240,7 +229,7 @@ export class SceneController {
         // matching setBuildPlateSize's division formula
         const gridDivisions = Math.min(200, Math.max(10, Math.round(gridSize / 0.2)));
         this.grid = new THREE.GridHelper(gridSize, gridDivisions, 0x2a2a44, 0x1e1e36);
-        this.grid.position.y = -0.001; // parked a hair under y=0 so bed geometry can't z-fight it
+        this.grid.position.y = -0.001; // offset below y=0 to avoid z-fighting with bed geometry
         this.scene.add(this.grid);
 
         // Translucent solid plate mesh beneath the grid; shadow receiver
@@ -291,10 +280,9 @@ export class SceneController {
     }
 
     /**
-     * Build the red/green/blue X/Y/Z axis stubs at the origin as thick lines:
-     * Line2/LineMaterial, since plain THREE.Line can't be made thicker in WebGL.
-     * Each stub is `length` units long; linewidth is a fixed screen-space pixel
-     * count so the stubs stay readable no matter how far the camera zooms.
+     * Build the red/green/blue X/Y/Z axis stubs at the origin as thick lines
+     * (Line2/LineMaterial, since plain THREE.Line can't be widened in WebGL);
+     * linewidth is a fixed screen-space pixel count.
      */
     _createAxisLines(length) {
         const origin = new THREE.Vector3(0, 0, 0);
@@ -349,21 +337,16 @@ export class SceneController {
     }
 
     /**
-     * Resize the build plate: by default disposes the old grid/surface/border
-     * and rebuilds all of them at the new size (the infinite-build-plate
-     * feature calls this repeatedly as the bed grows). In simple-plate mode it
-     * instead stretches the existing furniture in place - no geometry or
-     * material is recreated, so these frequent resizes stay cheap.
+     * Resize the build plate; by default disposes and rebuilds all furniture
+     * at the new size, but in simple-plate mode stretches it in place instead.
      */
     setBuildPlateSize(size) {
         if (!Number.isFinite(size) || size <= 0) return;
 
-        // Simple-plate mode: stretch the current meshes to the target instead of
-        // rebuilding them. The scale is computed against the furniture's native
-        // (unscaled) size, so it stays exact no matter how many times we've
-        // stretched before. Each object stretches along its own world axes -
-        // the grid lies flat in XZ natively, while the plate/border are rotated
-        // to lie flat, so their local XY maps onto world X/Z.
+        // Simple-plate mode: stretch instead of rebuild. The scale is computed
+        // against native (unscaled) size; each object stretches along its own
+        // axes - the grid lies flat in XZ natively, while the plate/border are
+        // rotated so their local XY maps onto world X/Z.
         if (this.simplePlateMode) {
             const factor = size / this._plateGeomSize;
             if (!Number.isFinite(factor) || factor <= 0) return;
@@ -375,8 +358,8 @@ export class SceneController {
             return;
         }
 
-        // Tear down and dispose the previous grid/surface/border - this runs a
-        // lot as the bed resizes, so leaked GPU buffers would add up fast.
+        // Dispose the previous grid/surface/border; this runs often on resize,
+        // so leaks would add up fast.
         [this.grid, this.buildPlate, this.borderLine].forEach((obj) => {
             if (!obj) return;
             this.scene.remove(obj);
@@ -439,12 +422,9 @@ export class SceneController {
     }
 
     /**
-     * Dispose the current grid/surface/border and rebuild them all at `size`,
-     * regardless of simple-plate mode - re-baselining the furniture so its native
-     * (unscaled) size is exactly `size`. Used when entering simple-plate mode so
-     * that stretching always starts from the default-size geometry (steady grid
-     * density) instead of whatever larger, densely-divided plate happened to be
-     * in place. The active mode is restored afterwards for future stretches.
+     * Rebuild all furniture at `size` regardless of simple-plate mode, so its
+     * native (unscaled) size is exactly `size`; the active mode is restored
+     * afterwards. Used when entering simple-plate mode for steady grid density.
      */
     rebuildBuildPlate(size) {
         if (!Number.isFinite(size) || size <= 0) return;
@@ -474,21 +454,15 @@ export class SceneController {
     }
 
     /**
-     * Create the per-mesh wireframe overlay: a full black wireframe
-     * (hidden by default, shown only in 'wireframe-hybrid' mode). It's a
-     * plain LineSegments - not THREE.Mesh - so it's automatically skipped
-     * by raycasting/picking, view-mode material switching, and mesh stat
-     * counting, which all filter on `child.isMesh`.
+     * Create the per-mesh black wireframe overlay (hidden except in
+     * 'wireframe-hybrid' mode); as a plain LineSegments it's skipped by
+     * picking, view-mode switching and stat counting, which filter on isMesh.
      */
     _addMeshOverlays(child) {
         if (!child.isMesh || !child.geometry) return;
 
-        // The wireframe overlay below sits exactly on the mesh surface
-        // (it's built from its own geometry), so without help the GPU depth
-        // buffer can't reliably tell which one is "in front". Nudging the
-        // solid surface's depth back very slightly (polygon offset) makes
-        // the faces lose ties cleanly, so the overlay drawn on top always
-        // wins instead of z-fighting.
+        // The wireframe overlay below sits exactly on the mesh surface; a
+        // slight polygon offset keeps it winning depth ties instead of z-fighting.
         this._makeOutlineSafe(child.material);
 
         // Black full-edge overlay used by 'wireframe-hybrid': draws every
@@ -515,10 +489,8 @@ export class SceneController {
     }
 
     /**
-     * Apply the current global shading style (flat by default, smooth when
-     * toggled on) to a material. Safe to call on any material type -
-     * silently no-ops on materials that don't support flatShading (e.g.
-     * line/basic materials used for overlays).
+     * Apply the current global shading style to a material; no-op on types
+     * without flatShading (e.g. overlay line materials).
      */
     _applyShadingMode(material) {
         if (!material) return;
@@ -532,10 +504,8 @@ export class SceneController {
     }
 
     /**
-     * Toggle between flat (raw polygon facets, default) and smooth
-     * (interpolated-normal, rounded/bumpy) shading for every object
-     * currently in the scene. New objects added afterwards automatically
-     * pick up whichever mode is active (see addObject/_switchLodLevel).
+     * Toggle flat/smooth shading for all current objects; new objects pick
+     * up the active mode automatically (see addObject/_switchLodLevel).
      */
     setSmoothShading(enabled) {
         this.smoothShading = enabled;
@@ -549,11 +519,10 @@ export class SceneController {
     }
 
     /**
-     * Register a part with the scene graph and return its registry id. When no
-     * explicit id is supplied a sequential obj_N key is assigned, which the UI
-     * uses to track the part across save/load round-trips; every mesh beneath
-     * it is then run through the optimizer and given the active shading style
-     * so parts look consistent no matter where their material came from.
+     * Register a part with the scene graph and return its registry id; a
+     * sequential obj_N key (used by the UI across save/load) is assigned when
+     * none is supplied. Every mesh beneath it gets the optimizer pass, active
+     * shading style and view mode applied.
      * @param {THREE.Mesh|THREE.Group} object - The part to register (a single mesh or a group of meshes)
      * @param {string} [id] - Registry key; a sequential obj_N id is assigned when omitted
      * @returns {string} The registry id under which the part is stored
@@ -564,7 +533,7 @@ export class SceneController {
             id = `obj_${this.objectIdCounter}`;
         }
 
-        // Pin the part's name to its registry id so dispose() can look parts up by name, and enable shadows on every mesh beneath it.
+        // Pin the part's name to its registry id (dispose looks parts up by name); enable shadows on every mesh beneath it.
         object.name = id;
         object.traverse((child) => {
             if (child.isMesh) {
@@ -575,17 +544,12 @@ export class SceneController {
                 if (this.optimizer) {
                     this.optimizer.optimizeMesh(child);
                 }
-                // Apply the currently active shading style (flat by
-                // default) so every object - regardless of where its
-                // material was created (server load, primitive, paste,
-                // transform-replace) - looks consistent without callers
-                // needing to remember to set flatShading themselves.
+                // Apply the active shading style so objects look consistent
+                // regardless of where their material came from.
                 this._applyShadingMode(child.material);
                 this._addMeshOverlays(child);
-                // Apply the currently active view mode too, so a mesh created
-                // while wireframe/transparent/wireframe-hybrid is on renders in
-                // that style immediately instead of as plain opaque shading.
-                // Must run after _addMeshOverlays so the hybrid overlay exists.
+                // Apply the active view mode too; must run after
+                // _addMeshOverlays so the hybrid overlay exists.
                 this._applyViewModeToMesh(child);
             }
         });
@@ -604,19 +568,16 @@ export class SceneController {
     }
 
     /**
-     * Unregister and destroy a part. The whole subtree is disposed - geometry
-     * and materials of every descendant, not just top-level meshes - so GPU
-     * buffers are actually released and the outline/wireframe overlay
-     * LineSegments go with them; the id's selection entry is dropped too so no
-     * stale reference keeps a dead part alive.
+     * Unregister and destroy a part, disposing geometry/materials of every
+     * descendant (including overlay LineSegments) and dropping its selection
+     * entry.
      */
     removeObject(id) {
         const obj = this.objects.get(id);
         if (obj) {
             this.scene.remove(obj);
-            // Dispose geometries and materials to free GPU memory. This
-            // covers every descendant (not just isMesh children) so the
-            // outline/wireframe overlay LineSegments are cleaned up too.
+            // Dispose geometry/materials of every descendant, including the
+            // outline/wireframe overlay LineSegments.
             obj.traverse((child) => {
                 if (child.geometry) child.geometry.dispose();
                 if (child.material) {
@@ -637,10 +598,8 @@ export class SceneController {
     }
 
     /**
-     * Make this part the sole selection, replacing whatever was selected
-     * before - mirroring how a plain click in the viewport replaces the current
-     * pick (shift-click uses addToSelection instead). Previously selected parts
-     * have their highlight reset as they are dropped.
+     * Make this part the sole selection, replacing the previous one and
+     * resetting its highlight (shift-click uses addToSelection instead).
      */
     selectObject(id) {
         this.selectedObjects.forEach(sid => {
@@ -658,10 +617,8 @@ export class SceneController {
     }
 
     /**
-     * Flip one part's membership in the multi-selection set - the shift-click
-     * path: already-selected parts are dropped, unselected ones join. The
-     * affected part's highlight is refreshed immediately so the viewport
-     * reflects the change without waiting for the next frame.
+     * Flip one part's membership in the multi-selection set (shift-click
+     * path); its highlight refreshes immediately.
      */
     toggleObjectSelection(id) {
         if (!id || !this.objects.has(id)) return;
@@ -682,10 +639,9 @@ export class SceneController {
     }
 
     /**
-     * Grow the multi-selection set with one more id, leaving existing members
-     * untouched - again the shift-click path, as opposed to selectObject which
-     * replaces the whole set. With an empty selection this degrades to a plain
-     * single-select; adding an already-selected part is a no-op.
+     * Add one id to the multi-selection set, leaving existing members
+     * untouched (selectObject replaces the whole set instead). With an empty
+     * selection this degrades to a plain single-select.
      */
     addToSelection(id) {
         if (!id || !this.objects.has(id)) return;
@@ -700,9 +656,8 @@ export class SceneController {
     }
 
     /**
-     * Empty the selection set and restore every part's material to its
-     * pre-selection emissive state - triggered by Escape or a click on empty
-     * space in the viewport.
+     * Empty the selection set and restore each part's pre-selection emissive
+     * state (Escape or a click on empty space).
      */
     deselectAll() {
         this.selectedObjects.forEach(sid => {
@@ -715,17 +670,14 @@ export class SceneController {
     }
 
     /**
-     * Return the ids of all currently selected parts as a plain array in
-     * insertion order; the toolbar and inspector consume this to decide which
-     * group actions are enabled.
+     * Ids of all currently selected parts, as an array in insertion order.
      */
     getSelectedObjectIds() {
         return [...this.selectedObjects];
     }
 
     /**
-     * Number of parts in the current selection; the status bar shows this next
-     * to batch operations so their scope is visible at a glance.
+     * Number of parts in the current selection (shown by the status bar).
      */
     getSelectionCount() {
         return this.selectedObjects.size;
@@ -755,9 +707,8 @@ export class SceneController {
     }
 
     /**
-     * Switch every part between the normal / wireframe / transparent shading
-     * styles. Each material's needsUpdate flag is set so the change takes
-     * effect on the very next frame instead of waiting for a shader recompile.
+     * Switch every part to the given view mode; each material's needsUpdate is
+     * set so the change applies on the next frame.
      */
     setViewMode(mode) {
         this.viewMode = mode;
@@ -772,12 +723,9 @@ export class SceneController {
     }
 
     /**
-     * Apply the currently active view mode (normal / wireframe / transparent /
-     * wireframe-hybrid) to a single mesh's material and overlay. Factored out of
-     * setViewMode so meshes created after the fact - fresh imports, pasted
-     * copies, LOD level swaps - pick up whichever style is already active instead
-     * of defaulting to plain opaque shading (the reason an object imported while
-     * in wireframe mode rendered as a solid until the next view-mode toggle).
+     * Apply the currently active view mode to a single mesh's material and
+     * overlay; factored out of setViewMode so meshes created later (imports,
+     * pastes, LOD swaps) pick up the active style instead of plain opaque.
      */
     _applyViewModeToMesh(child) {
         if (!child || !child.material) return;
@@ -799,7 +747,7 @@ export class SceneController {
                 child.material.transparent = false;
                 child.material.opacity = 1.0;
                 break;
-            default: // 'normal' - plain opaque shading (ColliBoy)
+            default: // 'normal' - plain opaque shading
                 child.material.wireframe = false;
                 child.material.transparent = false;
                 child.material.opacity = 1.0;
@@ -807,9 +755,7 @@ export class SceneController {
         }
 
         // Three.js only recompiles a material's shader/blending setup when
-        // needsUpdate is set - toggling `transparent` in place (as above)
-        // silently has no visual effect without this, which is why Transparent
-        // mode looked like it did nothing.
+        // needsUpdate is set; toggling `transparent` in place does nothing without it.
         child.material.needsUpdate = true;
 
         // Show the full black wireframe overlay only in wireframe-hybrid mode;
@@ -943,10 +889,8 @@ export class SceneController {
             }
         }
 
-        // LOD meshes are added directly to the existing object group
-        // (not via addObject), so the active shading style and view mode both
-        // have to be applied here explicitly, or switching LOD levels would
-        // silently revert a flat-shaded / wireframed model back to smooth solid.
+        // LOD meshes are added directly (not via addObject), so the active
+        // shading style and view mode must be applied here explicitly.
         this._applyShadingMode(material);
 
         const mesh = new THREE.Mesh(geometry, material);
@@ -978,11 +922,9 @@ export class SceneController {
     }
 
     /**
-     * Report the axis-aligned bounds of one part, or of everything in the
-     * scene when no id is given (the combined-box path unions per-object boxes
-     * without reparenting anything - see _getCombinedBox), so this stays cheap
-     * enough to run on demand from the toolbar. Returns null for an empty
-     * scene or an unknown id.
+     * Axis-aligned bounds of one part, or of everything in the scene when no
+     * id is given (see _getCombinedBox); returns null for an empty scene or
+     * unknown id.
      */
     getBoundingBox(id) {
         if (id) {
@@ -1034,10 +976,9 @@ export class SceneController {
     }
 
     /**
-     * Count triangles and vertices across one part or the whole scene by
-     * walking each mesh's geometry; indexed meshes contribute index.count/3
-     * faces, non-indexed ones fall back to position.count/3. The status bar
-     * uses this to show how heavy a model is.
+     * Count triangles and vertices across one part or the whole scene; indexed
+     * meshes contribute index.count/3 faces, non-indexed fall back to
+     * position.count/3 (shown by the status bar).
      */
     getMeshStats(id) {
         const targets = id ? [this.objects.get(id)] : [...this.objects.values()];
@@ -1061,23 +1002,14 @@ export class SceneController {
     }
 
     /**
-     * Reframe the viewport so the whole build sits centered in view: the
-     * controls target moves to the combined bounding-box center and the camera
-     * is pulled back along a fixed elevated 3/4 direction by a distance derived
-     * from the box's largest dimension and the lens FOV. With an empty scene it
-     * falls back to the default home position instead.
+     * Reframe the viewport so the whole build sits centered in view; with an
+     * empty scene it falls back to the default home position.
      */
     resetView() {
         const box = this.getBoundingBox();
         if (!box) {
-            // No objects - reset to default. Must call controls.update()
-            // here same as the populated-scene path below, or OrbitControls
-            // never picks up the new camera/target and the viewport keeps
-            // showing the old framing - this is what made "New Project"
-            // (which empties the scene, always hitting this branch) look
-            // like it wasn't resetting the view at all, even though the
-            // reset-view button - usually clicked with objects still in
-            // the scene - appeared to work fine.
+            // No objects - reset to default; controls.update() is required here
+            // too, or OrbitControls keeps showing the old framing.
             this.camera.position.set(3, 2, 3);
             this.controls.target.set(0, 0, 0);
             this.controls.update();
@@ -1088,7 +1020,7 @@ export class SceneController {
         const maxDim = Math.max(box.width, box.height, box.depth);
         const fov = this.camera.fov * (Math.PI / 180);
         let distance = maxDim / (2 * Math.tan(fov / 2));
-        distance *= 1.5; // leave headroom so parts sit comfortably inside the viewport rather than on its edges
+        distance *= 1.5; // leave headroom so parts don't sit on the viewport's edges
 
         this.controls.target.copy(center);
         this.camera.position.set(
@@ -1101,24 +1033,15 @@ export class SceneController {
 
     /**
      * Determine whether a geometry is "hollow" in this app's sense: not a
-     * closed/watertight surface, i.e. it has open boundary edges (holes)
-     * that would make CSG operations (union/subtract/intersect) fail until
-     * the model is repaired - the same failure mode the "Solid" button
-     * fixes by calling the mesh-repair endpoint. This is only meant to be
-     * run on freshly imported/opened models; primitives and CSG results
-     * are assumed already-solid and should never be passed in.
+     * closed/watertight surface, i.e. it has open boundary edges (holes) that
+     * would make CSG operations fail until the model is repaired - the same
+     * failure mode the "Solid" button fixes via the geometry-solid endpoint.
+     * Only meant for freshly imported/opened models; primitives and CSG results
+     * are assumed already-solid.
      *
-     * Method: weld coincident vertices, then count how many triangles use
-     * each undirected edge. In a closed manifold surface every edge is
-     * shared by exactly two triangles; any edge used by only one triangle
-     * is a boundary edge - a hole in the surface. (An earlier version of
-     * this check instead looked for a shell nested inside another shell,
-     * which is a different and much rarer situation - a single shell with
-     * a hole, like a thin eggshell missing a patch, has only one shell and
-     * was always reported as "not hollow" even though it can't be merged
-     * without repair first. Edge-sharing is the right test for that.)
-     * Best-effort heuristic - on any failure this safely reports
-     * "not hollow" rather than throwing.
+     * Method: weld coincident vertices, then count how many triangles use each
+     * undirected edge - any edge used by only one triangle is a boundary edge
+     * (a hole). Best-effort heuristic; on failure this reports "not hollow".
      */
     detectHollow(geometry) {
         try {
@@ -1131,9 +1054,8 @@ export class SceneController {
             const triCount = index.length / 3;
             if (triCount === 0) return false;
 
-            // Weld vertices sharing (approximately) the same position so
-            // edge-sharing is detected even when a mesh has duplicated
-            // vertices per face (e.g. flat-shaded imports).
+            // Weld coincident vertices so edge-sharing is detected even with
+            // duplicated vertices per face (e.g. flat-shaded imports).
             const precision = 1e4; // ~0.0001 unit merge tolerance
             const keyToId = new Map();
             const vertOf = new Array(posAttr.count);
@@ -1164,8 +1086,7 @@ export class SceneController {
                 addEdge(c, a);
             }
 
-            // Any edge shared by only one triangle is a boundary edge -
-            // the surface has a hole there and isn't watertight.
+            // An edge used by only one triangle is a boundary edge (a hole).
             for (const count of edgeCount.values()) {
                 if (count === 1) return true;
             }
@@ -1209,11 +1130,9 @@ export class SceneController {
     }
 
     /**
-     * Translate a screen-space click into the id of the part under it: client
-     * coordinates are mapped to NDC, a ray is cast from the camera, and the
-     * first mesh hit wins - its userData.objectId (stamped when the object was
-     * added) identifies which registered part owns that mesh. Returns null when
-     * the click lands on empty space or the build plate.
+     * Translate a screen-space click into the id of the part under it; the
+     * first ray-hit mesh's userData.objectId identifies its registered part,
+     * and null is returned for empty space or the build plate.
      */
     pickObject(clientX, clientY) {
         const rect = this.canvas.getBoundingClientRect();
@@ -1240,6 +1159,46 @@ export class SceneController {
     }
 
     /**
+     * Hit-test a click against slightly enlarged bounding boxes (5% of each
+     * selected part's largest dimension plus a small floor) so nested parts
+     * stay grabbable; returns the nearest selected part hit, or null.
+     */
+    pickSelectedByHitbox(clientX, clientY) {
+        const ids = this.getSelectedObjectIds();
+        if (ids.length === 0) return null;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const mouse = new THREE.Vector2(
+            ((clientX - rect.left) / rect.width) * 2 - 1,
+            -((clientY - rect.top) / rect.height) * 2 + 1
+        );
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, this.camera);
+
+        let bestId = null;
+        let bestDist = Infinity;
+        for (const id of ids) {
+            const obj = this.objects.get(id);
+            if (!obj) continue;
+            const box = new THREE.Box3().setFromObject(obj);
+            if (box.isEmpty()) continue;
+
+            const size = box.getSize(new THREE.Vector3());
+            box.expandByScalar(Math.max(size.x, size.y, size.z) * 0.05 + 0.1);
+
+            const entry = new THREE.Vector3();
+            if (raycaster.ray.intersectBox(box, entry)) {
+                const dist = raycaster.ray.origin.distanceTo(entry);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestId = id;
+                }
+            }
+        }
+        return bestId;
+    }
+
+    /**
      * Per-frame tick: re-schedules itself, lets OrbitControls finish any
      * inertia/damping, refreshes LOD assignments from the current camera
      * distance when LOD is enabled, then renders.
@@ -1262,10 +1221,8 @@ export class SceneController {
 
     /**
      * Tear everything down when the viewport is destroyed: detach the resize
-     * listener, remove and dispose every registered part (keyed by name - which
-     * is why addObject pins each part's name to its registry id), release the
-     * optimizer's cached resources, and finally dispose the renderer so no GPU
-     * resource outlives this controller.
+     * listener, remove and dispose every registered part (keyed by name),
+     * release optimizer resources, and dispose the renderer.
      */
     dispose() {
         window.removeEventListener('resize', this.onResize);

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=web-3d-builder
+Comment=Browser-based 3D mesh editor
+Exec=/app/web3dbuilder/web3dbuilder
+Icon=/app/web3dbuilder/static/img/logo.svg
+Terminal=true
+Type=Application
+Categories=Graphics;3DGraphics;

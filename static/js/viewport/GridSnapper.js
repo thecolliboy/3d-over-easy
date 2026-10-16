@@ -7,13 +7,13 @@ import * as THREE from 'three';
 export class GridSnapper {
     constructor(scene, options = {}) {
         this.scene = scene;
-        this.snapSize = options.snapSize ?? 1.0; // default cell size in world units
+        this.snapSize = options.snapSize ?? 1.0; // Default cell size in world units
 
         // Faint floor-grid overlay shown while snapping is active
         this.gridHelper = null;
         this._createGrid();
 
-        // Marker sphere dropped on the cell where the current transform snaps to
+        // Marker sphere marking the grid cell the object currently snaps to
         this.snapIndicator = null;
         this._createSnapIndicator();
 
@@ -128,7 +128,7 @@ export class GridSnapper {
     }
 
     /**
-     * Park the marker on the snapped position and size it with the cell, so
+     * Park the marker on the snapped position and scale it to the cell, so
      * the current snap target stays visible (ColliBoy).
      */
     _updateSnapIndicator(object) {

@@ -6,9 +6,14 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
  * translate/rotate/scale gizmos with pivot-aware rotation.
  */
 export class TransformGizmo {
-    constructor(camera, domElement) {
+    constructor(camera, domElement, scene = null) {
         this.domElement = domElement;
         this.control = new TransformControls(camera, domElement);
+
+        // The gizmo's handles are children of the controls object, so they
+        // only render once it joins the scene graph - otherwise the translate
+        // arrows never appear on a selected shape.
+        if (scene) scene.add(this.control);
 
         this.control.setSize(0.1);
         this.enabled = false;
@@ -29,7 +34,7 @@ export class TransformGizmo {
         this.ratioLockEnabled = false;
         this._ratioLockBase = null;
 
-        // Pointer shows grab while a handle is hovered, so drags feel intentional
+        // Show grab cursor while hovering a handle.
         this.control.addEventListener('hoverOn', () => {
             this.domElement.style.cursor = 'grab';
         });
@@ -44,13 +49,10 @@ export class TransformGizmo {
             this._updateRatioLock();
         });
 
-        // Drag lifecycle - used to wrap/unwrap the attached object in a
-        // temporary pivot for non-default rotate pivots. Wrapping only for
-        // the duration of an actual drag (rather than for the whole time
-        // the object is selected) keeps the object a direct child of the
-        // scene at all other times, so deletion/undo/etc. keep working
-        // exactly as before. Also snapshots the pre-drag scale while ratio
-        // lock is on, so locked drags can derive their factor from it.
+        // Drag lifecycle - wrap/unwrap the object in a temporary pivot for
+        // non-default rotate pivots; wrapping only during an actual drag keeps
+        // it a direct child of the scene otherwise, so deletion/undo keep
+        // working as before. Also snapshots pre-drag scale while ratio lock is on.
         this.control.addEventListener('dragging-changed', (event) => {
             if (event.value) {
                 this._beginPivotDrag();
@@ -111,11 +113,7 @@ export class TransformGizmo {
 
     /**
      * At drag start (scale mode only), snapshot the object's scale so every
-     * locked update during this one drag derives its factor from the same
-     * baseline. TransformControls rewrites object.scale from its own start
-     * value on every pointer move, resetting untouched axes - so the lock has
-     * to re-assert proportionality after each of those writes (see
-     * _updateRatioLock) rather than adjusting incrementally.
+     * locked update in this one drag derives its factor from the same baseline.
      */
     _beginRatioLock() {
         if (!this.ratioLockEnabled || this.mode !== 'scale') return;
@@ -125,12 +123,10 @@ export class TransformGizmo {
     }
 
     /**
-     * Re-asserts proportional scaling after each TransformControls write. The
-     * controls' scale mode sets object.scale to (startScale × factor) with the
-     * factor applied only along the dragged handle's axis, so this reads that
-     * factor back off the dragged axis and applies it to all three axes from
-     * the drag-start baseline. Runs on every objectChange; no-ops outside a
-     * locked scale drag.
+     * Re-assert proportional scaling after each TransformControls write: read
+     * the factor off the dragged axis and apply it to all three axes from the
+     * drag-start baseline. Runs on every objectChange; no-ops outside a locked
+     * scale drag.
      */
     _updateRatioLock() {
         if (!this.ratioLockEnabled || this.mode !== 'scale') return;
@@ -167,11 +163,9 @@ export class TransformGizmo {
     }
 
     /**
-     * On drag start, if we're in rotate mode, reparent the real object
-     * under a temporary pivot positioned at the world point rotation
-     * should occur around, and point the gizmo at the pivot instead - so
-     * the handle spins the object around that point rather than the
-     * object's own origin. Preserves the object's world transform exactly.
+     * On drag start in rotate mode, reparent the real object under a temporary
+     * pivot at the rotation point and attach the gizmo to it; preserves the
+     * object's world transform exactly.
      */
     _beginPivotDrag() {
         if (this.mode !== 'rotate') return;
@@ -256,9 +250,8 @@ export class TransformGizmo {
      * Switch between translate/rotate/scale modes.
      */
     setMode(mode) {
-        // Defensive: don't leave an object parented under a stray pivot if
-        // the mode changes mid-drag for any reason. A stale ratio-lock base is
-        // equally invalid once the mode changes, so drop it too.
+        // A mid-drag mode change invalidates both the pivot wrap and any
+        // ratio-lock base, so clear them defensively.
         this._endPivotDrag();
         this._ratioLockBase = null;
         this.mode = mode;

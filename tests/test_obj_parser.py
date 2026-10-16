@@ -263,7 +263,7 @@ def test_parse_no_faces():
     """Meshes without faces fail conversion."""
     mesh = ObjMesh()
     mesh.vertices = [(0, 0, 0)]
-    # face list left empty
+    # no faces set
 
     with pytest.raises(ObjParseError, match="No faces"):
         obj_to_mesh_arrays(mesh)
@@ -298,8 +298,8 @@ f 1 2 1'''
 # round-trip coverage
 
 def test_write_and_parse_round_trip():
-    """A triangle mesh survives conversion to arrays and back through the writer."""
-    # build a single-corner-set triangle
+    """Triangle meshes convert to flat arrays with expected counts."""
+    # build a single-triangle mesh
     mesh = ObjMesh()
     mesh.vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
     mesh.faces = [[(0, -1, -1), (1, -1, -1), (2, -1, -1)]]

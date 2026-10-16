@@ -1,7 +1,7 @@
 """Unit tests for the PLY (Polygon File Format) parser.
 
-Covers ascii and binary parsing, format detection, vertex properties such as
-normals and colors, face records, stats extraction, and malformed inputs.
+Covers ascii and binary parsing, format detection, vertex normals and colors,
+face records, stats extraction, and malformed inputs.
 """
 # ColliBoy
 
@@ -19,7 +19,7 @@ from app.parsers.ply_parser import (
 # format detection coverage
 
 def test_detect_ascii_ply():
-    """The ascii format line is classified as ascii."""
+    """An ascii header is classified as 'ascii'."""
     data = b'''ply
 format ascii 1.0
 element vertex 3
@@ -35,7 +35,7 @@ end_header
 
 
 def test_detect_binary_little_endian_ply():
-    """The binary_little_endian format line is recognized."""
+    """A little-endian binary header is classified as 'binary_little_endian'."""
     data = b'''ply
 format binary_little_endian 1.0
 element vertex 3
@@ -48,7 +48,7 @@ end_header'''
 
 
 def test_detect_binary_big_endian_ply():
-    """The binary_big_endian format line is recognized."""
+    """A big-endian binary header is classified as 'binary_big_endian'."""
     data = b'''ply
 format binary_big_endian 1.0
 element vertex 3
@@ -167,7 +167,7 @@ def test_parse_binary_little_endian():
 
 
 def test_parse_binary_round_trip():
-    """Generated binary payloads decode to their declared vertex counts at several sizes."""
+    """Generated payloads decode to their declared vertex counts across sizes."""
     for num_v in [1, 10, 100]:
         data = _make_binary_little_endian_ply(num_v)
         mesh = parse_ply(data)
@@ -277,7 +277,7 @@ end_header
 
 
 def test_parse_format_type_tracking():
-    """The decoded mesh records which format variant was used."""
+    """The parsed mesh records its source format variant."""
     data = _make_binary_little_endian_ply(5)
     mesh = parse_ply(data)
 

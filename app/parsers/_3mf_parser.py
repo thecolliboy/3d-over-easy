@@ -15,10 +15,13 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Mesh3MF:
-    """Parsed <mesh> resource: flat vertex positions, triangle indices, optional per-vertex colors."""
+    """Parsed <mesh> resource: flat vertex positions, triangle indices, optional per-vertex colors.
+
+    `transform` holds the item's positional data (row-major 4x4 from the build section) when the archive places this mesh with a transform instead of baking it in."""
     vertices: List[float] = field(default_factory=list)  # interleaved x,y,z triples
     indices: Optional[List[int]] = None  # a,b,c index triplet per triangle
     colors: Optional[List[float]] = None  # interleaved r,g,b,a quads, one per vertex
+    transform: Optional[List[float]] = None  # row-major 4x4 from <item transform="..."/>
 
 
 @dataclass
@@ -39,8 +42,7 @@ def detect_3mf(data: bytes) -> bool:
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 namelist = zf.namelist()
-                # spec puts the model under 3D/, but exporters vary - accept any *model* xml/model part,
-                # mirroring _find_model_file's own fallback so detection never rejects what it can parse
+                # spec expects 3D/, but exporters vary - mirror _find_model_file's fallback so detection accepts anything we can parse
                 for name in namelist:
                     low = name.lower()
                     if 'model' in low and (low.endswith('.xml') or low.endswith('.model')):
@@ -102,10 +104,31 @@ def _parse_3mf_xml(xml_data: bytes, scene: ThreeMFScene) -> ThreeMFScene:
     except ET.ParseError as e:
         raise ThreeMFParseError(f"Invalid XML in 3MF file: {e}")
 
-    # <resources> holds every mesh definition in the file
+    # <resources> holds every mesh definition in the file, keyed by object id where present
+    entries = []
     resources = _find_element(root, 'resources')
     if resources is not None:
-        scene.meshes.extend(_parse_meshes(resources))
+        entries = _parse_meshes(resources)
+
+    # <build> items carry each object's positional data; map item transforms onto their meshes
+    item_transforms = {}
+    build = _find_element(root, 'build')
+    if build is not None:
+        for item in _find_all_elements(build, 'item'):
+            obj_id = item.get('objectid') or item.get('objectId')
+            t_attr = item.get('transform')
+            if obj_id and t_attr:
+                try:
+                    values = [float(v) for v in t_attr.split()]
+                except ValueError:
+                    continue
+                if len(values) == 16:
+                    item_transforms[obj_id] = values
+
+    for object_id, mesh in entries:
+        if object_id and object_id in item_transforms:
+            mesh.transform = item_transforms[object_id]
+        scene.meshes.append(mesh)
 
     return scene
 
@@ -130,63 +153,131 @@ def _find_all_elements(parent: ET.Element, tag: str) -> List[ET.Element]:
     return results
 
 
-def _parse_meshes(resources: ET.Element) -> List[Mesh3MF]:
-    """Extract each <mesh> under resources into a Mesh3MF with vertices, triangles, and colors."""
-    meshes = []
-    mesh_elements = _find_all_elements(resources, 'mesh')
+def _parse_meshes(resources: ET.Element) -> List[tuple]:
+    """Extract each <mesh> under resources as (object_id, Mesh3MF) pairs.
 
-    for mesh_elem in mesh_elements:
-        mesh_obj = Mesh3MF()
+    Spec files wrap geometry in <object type="model"><mesh>; some exporters emit
+    bare <mesh> entries instead, which come back with a None id."""
+    entries = []
+    for child in resources:
+        local_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if local_name == 'object':
+            object_id = child.get('id')
+            for mesh_elem in _find_all_elements(child, 'mesh'):
+                mesh_obj = _parse_mesh_element(mesh_elem)
+                if mesh_obj is not None:
+                    entries.append((object_id, mesh_obj))
+        elif local_name == 'mesh':
+            mesh_obj = _parse_mesh_element(child)
+            if mesh_obj is not None:
+                entries.append((None, mesh_obj))
 
-        # some exporters nest the geometry in an inner <mesh>; spec files keep it direct
-        mesh_content = _find_element(mesh_elem, 'mesh') or mesh_elem
+    return entries
 
-        vertices = []
-        indices = []
-        colors = []
 
-        # flag color support when any <tris> block declares a color set
-        has_color = False
-        for child in mesh_content:
-            local_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-            if local_name == 'tris' and child.get('colors'):
-                has_color = True
-                break
+def _parse_mesh_element(mesh_elem: ET.Element) -> Optional[Mesh3MF]:
+    """Decode one <mesh> element into a Mesh3MF with vertices, triangles, and colors."""
+    mesh_obj = Mesh3MF()
 
-        verts_elem = _find_element(mesh_content, 'vertices')
-        if verts_elem:
+    # some exporters nest the geometry in an inner <mesh>; spec files keep it direct
+    mesh_content = _find_element(mesh_elem, 'mesh') or mesh_elem
+
+    vertices = []
+    indices = []
+    colors = []
+
+    verts_elem = _find_element(mesh_content, 'vertices')
+    if verts_elem:
+        # spec uses <vertex x y z/>; older in-house exports used the short <v> tag
+        for vertex_elem in (_find_all_elements(verts_elem, 'vertex') or _find_all_elements(verts_elem, 'v')):
+            x = float(vertex_elem.get('x', 0))
+            y = float(vertex_elem.get('y', 0))
+            z = float(vertex_elem.get('z', 0))
+            vertices.extend([x, y, z])
+
+    # spec colors live in a <colors><color id=...><c r g b a/></color></colors> block;
+    # legacy exports nested one <c> under each vertex instead
+    color_block = _find_element(mesh_content, 'colors')
+    if color_block:
+        for color_set in _find_all_elements(color_block, 'color'):
+            for c_elem in _find_all_elements(color_set, 'c'):
+                r = float(c_elem.get('r', 1.0))
+                g = float(c_elem.get('g', 1.0))
+                b = float(c_elem.get('b', 1.0))
+                a = float(c_elem.get('a', 1.0))
+                colors.extend([r, g, b, a])
+
+    if not colors and verts_elem is not None:
+        # legacy per-vertex colors, kept for older exports
             for vertex_elem in _find_all_elements(verts_elem, 'v'):
-                x = float(vertex_elem.get('x', 0))
-                y = float(vertex_elem.get('y', 0))
-                z = float(vertex_elem.get('z', 0))
-                vertices.extend([x, y, z])
-
-                # some exporters nest an explicit color entry under each vertex
                 c_elem = _find_element(vertex_elem, 'c')
-                if c_elem:
+                if c_elem is not None:
                     r = float(c_elem.get('r', 1.0))
                     g = float(c_elem.get('g', 1.0))
                     b = float(c_elem.get('b', 1.0))
                     a = float(c_elem.get('a', 1.0))
                     colors.extend([r, g, b, a])
 
-        tris_elem = _find_element(mesh_content, 'tris')
-        if tris_elem:
-            for tri in tris_elem:
+    # spec uses <triangles><triangle v1 v2 v3/>; legacy exports used <tris><tri a b c/>
+    tris_elem = _find_element(mesh_content, 'triangles') or _find_element(mesh_content, 'tris')
+    if tris_elem:
+        for tri in tris_elem:
+            local_name = tri.tag.split('}')[-1] if '}' in tri.tag else tri.tag
+            if local_name == 'triangle':
+                a = int(tri.get('v1', 0))
+                b = int(tri.get('v2', 0))
+                c = int(tri.get('v3', 0))
+            elif local_name in ('tri', 't'):
                 a = int(tri.get('a', 0))
                 b = int(tri.get('b', 0))
                 c = int(tri.get('c', 0))
-                indices.extend([a, b, c])
+            else:
+                continue
+            indices.extend([a, b, c])
 
-        if vertices:
-            mesh_obj.vertices = vertices
-            mesh_obj.indices = indices or None
-            if has_color and colors:
-                mesh_obj.colors = colors
+    if vertices and indices:
+        mesh_obj.vertices = vertices
+        mesh_obj.indices = indices or None
+        if colors:
+            mesh_obj.colors = colors
+        return mesh_obj
 
-            meshes.append(mesh_obj)
+    return None
 
-    return meshes
+
+def apply_item_transform(vertices: List[float], matrix: List[float]) -> List[float]:
+    """Move local-space vertices through a row-major 4x4 item transform.
+
+    Used on import so meshes placed with an <item transform> land at their
+    archive positions once merged into the app's flat vertex pools."""
+    out = []
+    for i in range(0, len(vertices), 3):
+        x, y, z = vertices[i], vertices[i + 1], vertices[i + 2]
+        out.extend([
+            matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3],
+            matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7],
+            matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11],
+        ])
+    return out
+
+
+def _format_item_transform(transform) -> Optional[str]:
+    """Format a mesh's positional data as an <item transform="..."/> value.
+
+    Input is the 16-value column-major matrix the frontend ships (three.js
+    Matrix4.elements order); the spec stores it row-major, so the values are
+    transposed on the way out. Returns None when no valid transform is present.
+    """
+    if not isinstance(transform, (list, tuple)) or len(transform) != 16:
+        return None
+    try:
+        flat = [float(v) for v in transform]
+    except (TypeError, ValueError):
+        return None
+
+    # column-major index c*4+r holds M[r][c]; the spec wants rows concatenated
+    row_major = [flat[(i % 4) * 4 + (i // 4)] for i in range(16)]
+    return ' '.join(repr(v) for v in row_major)
 
 
 def write_3mf(
@@ -194,14 +285,18 @@ def write_3mf(
 ) -> bytes:
     """Serialize meshes back into a valid 3MF ZIP archive.
 
-    Each mesh dict needs 'vertices' (flat or per-vertex tuples); 'indices' and
-    'colors' are optional. Output follows the spec's content-type, relationship,
-    resources, and build layout structure.
+    Each mesh dict needs 'vertices' (flat or per-vertex tuples); 'indices',
+    'colors', and 'transform' are optional. Every mesh gets its own <object>
+    resource plus build item - models are never merged; when one carries a
+    16-value transform, the item keeps it as positional data instead of baking
+    positions into vertices. Output follows the spec's content-type, rels,
+    resources, and build layout.
     """
     resources_xml_parts = []
+    items_xml_parts = []
 
     for idx, mesh in enumerate(meshes):
-        mesh_id = str(idx + 1)
+        object_id = str(idx + 1)
 
         vertices = mesh['vertices']
         if isinstance(vertices, (list, tuple)) and len(vertices) > 0 and isinstance(vertices[0], (tuple, list)):
@@ -216,19 +311,8 @@ def write_3mf(
         # emit vertex entries at micro-meter precision
         verts_xml = '<vertices>'
         for v in vert_tuples:
-            verts_xml += f'<v x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}"/>'
+            verts_xml += f'<vertex x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}"/>'
         verts_xml += '</vertices>'
-
-        tris_xml = '<tris>'
-        if indices:
-            for i in range(0, len(indices), 3):
-                a, b, c = indices[i], indices[i + 1], indices[i + 2]
-                tris_xml += f'<tri a="{a}" b="{b}" c="{c}"/>'
-        else:
-            # indexless meshes fall back to sequential vertex triplets
-            for i in range(len(vert_tuples)):
-                tris_xml += f'<tri a="{i}" b="{i+1}" c="{i+2}"/>'
-        tris_xml += '</tris>'
 
         # normalize colors into RGBA quads; RGB input gets full opacity
         color_data = None
@@ -238,27 +322,37 @@ def write_3mf(
             else:
                 color_data = [(colors[i], colors[i + 1], colors[i + 2], 1.0) for i in range(0, len(colors), 3)]
 
-        mesh_xml = f'<mesh id="{mesh_id}">'
-        mesh_xml += verts_xml
-        if color_data:
-            tris_with_colors = '<tris colors="c1">'
+        tris_xml = '<triangles' + (' colors="c1"' if color_data else '') + '>'
+        if indices:
             for i in range(0, len(indices), 3):
                 a, b, c = indices[i], indices[i + 1], indices[i + 2]
-                tris_with_colors += f'<tri a="{a}" b="{b}" c="{c}"/>'
-            tris_with_colors += '</tris>'
+                tris_xml += f'<triangle v1="{a}" v2="{b}" v3="{c}"/>'
+        else:
+            # indexless meshes fall back to sequential vertex triplets
+            for i in range(0, len(vert_tuples), 3):
+                tris_xml += f'<triangle v1="{i}" v2="{i+1}" v3="{i+2}"/>'
+        tris_xml += '</triangles>'
 
+        mesh_xml = '<mesh>'
+        mesh_xml += verts_xml
+        if color_data:
             colors_xml = '<colors><color id="c1">'
             for r, g, b_val, a in color_data:
                 colors_xml += f'<c r="{r:.4f}" g="{g:.4f}" b="{b_val:.4f}" a="{a:.4f}"/>'
             colors_xml += '</color></colors>'
-
             mesh_xml += colors_xml
-            mesh_xml += tris_with_colors
-        else:
-            mesh_xml += tris_xml
+        mesh_xml += tris_xml
         mesh_xml += '</mesh>'
 
-        resources_xml_parts.append(mesh_xml)
+        # spec layout: every mesh lives inside an <object> resource that build items reference by id
+        resources_xml_parts.append(f'<object id="{object_id}" type="model">{mesh_xml}</object>')
+
+        # positional data rides on the item, keeping each model separate in the archive
+        transform_attr = _format_item_transform(mesh.get('transform'))
+        if transform_attr:
+            items_xml_parts.append(f'<item objectid="{object_id}" transform="{transform_attr}"/>')
+        else:
+            items_xml_parts.append(f'<item objectid="{object_id}"/>')
 
     # assemble the OPC package: content types, root rels, and the model document
     content_type = '[Content_Types].xml'
@@ -279,8 +373,8 @@ def write_3mf(
     <resources>
         {"".join(resources_xml_parts)}
     </resources>
-    <build builditemcount="{len(meshes)}" xmlns:design="http://schemas.microsoft.com/3dmanufacturing/design/2016/03">
-        {"".join(f'<item partnumber="{idx + 1}" />' for idx in range(len(meshes)))}
+    <build builditemcount="{len(meshes)}">
+        {"".join(items_xml_parts)}
     </build>
 </model>'''
 

@@ -3,9 +3,8 @@ import * as THREE from 'three';
 /**
  * ColliBoy - Rendering optimizations for large scenes with many objects.
  *
- * Material caching lets identical parameter sets share one instance, per-mesh
- * optimization pins culling flags on every mesh, and live stats track draws,
- * triangles, and an estimated GPU memory footprint surfaced in the status bar.
+ * Caches materials by parameter signature, pins frustum-culling flags per mesh,
+ * and tracks draws, triangles, and estimated GPU memory in the status bar.
  */
 export class WebGLOptimizer {
     constructor(sceneController) {
@@ -139,7 +138,7 @@ export class WebGLOptimizer {
     }
 
     /**
-     * Pin a mesh's frustum-culling flag so culling stays on no matter what upstream set.
+     * Pin a mesh's frustum-culling flag so nothing downstream can leave it off.
      */
     optimizeMesh(mesh) {
         if (!mesh || !mesh.isMesh) return;

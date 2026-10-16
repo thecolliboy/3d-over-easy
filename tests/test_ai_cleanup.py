@@ -11,8 +11,8 @@ import os
 
 import pytest
 
-# The route module itself: `app.routes` re-exports each blueprint under the
-# same short name, so a plain attribute lookup would grab the Blueprint.
+# Import the route module directly: `app.routes` re-exports each blueprint
+# under the same short name, so a plain attribute lookup would grab the Blueprint.
 import importlib
 
 ai_routes = importlib.import_module('app.routes.ai')

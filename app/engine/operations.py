@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 
 class OperationLog:
-    """Keeps one ordered entry list per active session (read-only today - no in-repo writer remains)."""
+    """Keeps one ordered entry list per active session; read-only, as no in-repo writer remains."""
 
     def __init__(self):
         # session_id -> chronological entry list

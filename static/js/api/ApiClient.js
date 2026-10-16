@@ -27,9 +27,7 @@ export class APIClient {
     }
 
     /**
-     * Liveness probe behind the connection indicator. Any HTTP reply - error
-     * statuses included - proves the server is reachable; only a network-level
-     * failure (connection refused, timeout) means disconnected.
+     * Liveness probe for the connection indicator; any HTTP reply (error statuses included) means reachable, only network failures mean disconnected.
      */
     async checkHealth() {
         try {
@@ -101,6 +99,17 @@ export class APIClient {
         return res.blob();
     }
 
+    // Saves the whole scene from client-side snapshots so every object is included regardless of backend session; positions are baked into vertex data for single-mesh formats, kept as per-mesh transforms in 3MF. Returns the export as a blob.
+    async exportScene(format, meshes) {
+        const res = await fetch(`${this.baseURL}/export/scene`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ format, meshes })
+        });
+        if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+        return res.blob();
+    }
+
     async exportPreset(preset, sessionId = null, objectId = null) {
         let url = `${this.baseURL}/export/preset?preset=${preset}`;
         const params = [];
@@ -113,17 +122,15 @@ export class APIClient {
     }
 
     // Mesh geometry endpoints (each call takes session_id + object_id)
-    async repairMesh(sessionId, objectId) {
-        return this.post('/geometry/repair', { session_id: sessionId, object_id: objectId });
+    async solidifyMesh(sessionId, objectId) {
+        return this.post('/geometry/solid', { session_id: sessionId, object_id: objectId });
     }
 
     async rotateModel(sessionId, objectId, angle, axis = 'z') {
         return this.post('/geometry/rotate', { session_id: sessionId, object_id: objectId, angle, axis });
     }
 
-    // Bakes a column-major 4x4 matrix (Matrix4.elements) into the backend's
-    // vertex copy - this is how gizmo drags and value-bar edits get committed,
-    // since those otherwise only move the client-side object.
+    // Bakes a column-major 4x4 matrix (Matrix4.elements) into the backend's vertex copy; commits gizmo drags and value-bar edits that otherwise only move the client-side object.
     async transformModel(sessionId, objectId, matrixElements) {
         return this.post('/geometry/transform', { session_id: sessionId, object_id: objectId, matrix: matrixElements });
     }
@@ -224,10 +231,7 @@ export class APIClient {
         return this.post(`/ai/cancel/${jobId}`);
     }
 
-    // Expects a '/objects/duplicate' backend route that clones the object
-    // server-side (same pattern as the CSG calls above) and returns the clone's
-    // mesh data + id. That route must be added on the backend for pasted
-    // objects to fully support repair/boolean/export.
+    // Expects a '/objects/duplicate' backend route that clones server-side and returns the clone's mesh data + id; required so pasted objects support solid/boolean/export.
     async duplicateObject(sessionId, objectId) {
         return this.post('/objects/duplicate', { session_id: sessionId, object_id: objectId });
     }
